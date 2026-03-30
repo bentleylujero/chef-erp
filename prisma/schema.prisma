@@ -1,0 +1,636 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum SkillLevel {
+  INTERMEDIATE
+  ADVANCED
+  PROFESSIONAL
+}
+
+enum Cuisine {
+  FRENCH
+  ITALIAN
+  DELI
+  MEXICAN
+  MEDITERRANEAN
+  JAPANESE
+  THAI
+  KOREAN
+  CHINESE
+  INDIAN
+  AMERICAN
+  MIDDLE_EASTERN
+  AFRICAN
+  CARIBBEAN
+  SOUTHEAST_ASIAN
+  FUSION
+  OTHER
+}
+
+enum IngredientCategory {
+  // Legacy (kept for backward compat, migrated away)
+  PROTEIN
+  PRODUCE
+
+  // Proteins – fine-grained
+  POULTRY
+  RED_MEAT
+  SEAFOOD
+  CURED_DELI
+
+  // Produce – fine-grained
+  VEGETABLE
+  FRUIT
+  AROMATIC
+  MUSHROOM
+
+  // Dairy & Cheese
+  DAIRY
+  CHEESE
+
+  // Condiments – fine-grained
+  CONDIMENT
+  SAUCE
+  PASTE
+  VINEGAR
+
+  // Unchanged
+  PANTRY_STAPLE
+  SPICE
+  GRAIN
+  LEGUME
+  OIL_FAT
+  HERB
+  NUT_SEED
+  SWEETENER
+  BEVERAGE
+  BAKING
+  OTHER
+}
+
+enum StorageType {
+  FRIDGE
+  FREEZER
+  PANTRY
+  COUNTER
+}
+
+enum Technique {
+  BRAISE
+  SAUTE
+  ROAST
+  GRILL
+  POACH
+  STEAM
+  FRY
+  DEEP_FRY
+  CURE
+  SMOKE
+  FERMENT
+  EMULSIFY
+  LAMINATE
+  SOUS_VIDE
+  BLANCH
+  DEGLAZE
+  FLAMBE
+  CONFIT
+  REDUCE
+  CARAMELIZE
+  PICKLE
+  BRINE
+  MARINATE
+  SEAR
+  STEW
+  BAKE
+  BROIL
+  WHISK
+  KNEAD
+  FOLD
+  TEMPER
+  CLARIFY
+  RENDER
+  CHIFFONADE
+  BRUNOISE
+  JULIENNE
+  MINCE
+  OTHER
+}
+
+enum RecipeSource {
+  AI_BATCH
+  AI_SINGLE
+  AI_CHAT
+  AI_CUISINE_EXPLORE
+  AI_EXPIRY_RESCUE
+  AI_PREFERENCE_DRIFT
+  AI_INGREDIENT_FILL
+  USER_CREATED
+  IMPORTED
+}
+
+enum GenerationTrigger {
+  ONBOARDING_BATCH
+  NEW_INGREDIENTS
+  CUISINE_EXPLORATION
+  PREFERENCE_DRIFT
+  EXPIRY_RESCUE
+  CHAT_REQUEST
+  MANUAL_REQUEST
+  INGREDIENT_FILL
+}
+
+enum GenerationJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum GroceryListStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+}
+
+enum GroceryItemSource {
+  MEAL_PLAN
+  PAR_LEVEL
+  CUISINE_KIT
+  MANUAL
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum SignalType {
+  COOKED
+  RATED
+  SKIPPED
+  FAVORITED
+  UNFAVORITED
+  PURCHASED
+  ADDED_TO_PLAN
+  REMOVED_FROM_PLAN
+  SEARCHED
+}
+
+enum SignalEntityType {
+  RECIPE
+  INGREDIENT
+}
+
+enum ReceiptScanStatus {
+  PENDING
+  PARSED
+  CONFIRMED
+  FAILED
+}
+
+enum ExplorationStatus {
+  NOT_STARTED
+  STOCKING_PANTRY
+  LEARNING_BASICS
+  INTERMEDIATE
+  COMFORTABLE
+}
+
+enum StarterItemPriority {
+  ESSENTIAL
+  RECOMMENDED
+  NICE_TO_HAVE
+}
+
+enum MealPrepStyle {
+  BATCH
+  DAILY
+  MIXED
+}
+
+// ─────────────────────────────────────────────
+// USER & IDENTITY
+// ─────────────────────────────────────────────
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String
+  avatarUrl          String?
+  skillLevel         SkillLevel @default(INTERMEDIATE)
+  dietaryRestrictions String[]
+  kitchenEquipment   String[]
+  onboardingComplete Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  flavorProfile      FlavorProfile?
+  cookingStyle       CookingStyle?
+  inventory          Inventory[]
+  recipeRatings      RecipeRating[]
+  cookingLogs        CookingLog[]
+  purchaseHistory    PurchaseHistory[]
+  receiptScans       ReceiptScan[]
+  groceryLists       GroceryList[]
+  mealPlans          MealPlan[]
+  preferenceSignals  PreferenceSignal[]
+  generationJobs     GenerationJob[]
+  cuisineExplorations CuisineExploration[]
+  techniqueLogs      TechniqueLog[]
+
+  @@index([email])
+}
+
+model FlavorProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  spiceTolerance  Int      @default(5) // 1-10
+  sweetPref       Int      @default(5)
+  saltyPref       Int      @default(5)
+  sourPref        Int      @default(5)
+  umamiPref       Int      @default(5)
+  bitterPref      Int      @default(5)
+  texturePrefs    Json     @default("{}")  // { "crispy": 7, "creamy": 8, "chewy": 5 }
+  ingredientAversions String[]
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CookingStyle {
+  id                 String        @id @default(cuid())
+  userId             String        @unique
+  primaryCuisines    Cuisine[]
+  exploringCuisines  Cuisine[]
+  preferredTechniques Technique[]
+  cookingPhilosophy  String?       // freeform: "I like rustic, hearty food with deep flavors"
+  mealPrepStyle      MealPrepStyle @default(MIXED)
+  updatedAt          DateTime      @updatedAt
+
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// INGREDIENTS & INVENTORY
+// ─────────────────────────────────────────────
+
+model Ingredient {
+  id              String             @id @default(cuid())
+  name            String             @unique
+  category        IngredientCategory
+  defaultUnit     String             // "g", "ml", "count", "bunch", etc.
+  shelfLifeDays   Int?
+  storageType     StorageType        @default(PANTRY)
+  avgPricePerUnit Float?
+  cuisineTags     Cuisine[]
+  flavorTags      Json               @default("{}") // { "spicy": 0, "sweet": 3, "umami": 7, ... }
+  description     String?
+  createdAt       DateTime           @default(now())
+
+  inventory       Inventory[]
+  recipeIngredients RecipeIngredient[]
+  purchaseHistory PurchaseHistory[]
+  groceryItems    GroceryItem[]
+  cuisineStarterItems CuisineStarterItem[]
+
+  @@index([name])
+  @@index([category])
+}
+
+model Inventory {
+  id           String      @id @default(cuid())
+  userId       String
+  ingredientId String
+  quantity     Float
+  unit         String
+  purchaseDate DateTime?
+  expiryDate   DateTime?
+  cost         Float?
+  location     StorageType @default(PANTRY)
+  parLevel     Float?      // minimum desired stock
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient  @relation(fields: [ingredientId], references: [id])
+
+  @@index([userId])
+  @@index([userId, ingredientId])
+  @@index([expiryDate])
+}
+
+// ─────────────────────────────────────────────
+// THE GROWING COOKBOOK
+// ─────────────────────────────────────────────
+
+model Recipe {
+  id                    String       @id @default(cuid())
+  title                 String
+  description           String
+  cuisine               Cuisine
+  difficulty            Int          // 1-5
+  techniques            Technique[]
+  instructions          Json         // [{step, technique, timing, notes}]
+  prepTime              Int          // minutes
+  cookTime              Int          // minutes
+  servings              Int
+  flavorTags            Json         @default("{}") // { spicy: 3, sweet: 1, umami: 8, ... }
+  tags                  String[]     // ["comfort", "quick", "date-night", "meal-prep"]
+  source                RecipeSource
+  parentRecipeId        String?      // for variants
+  generationJobId       String?
+  pantrySnapshotAtGen   Json?        // ingredient IDs available when this was generated
+  platePrice            Float?       // for food cost % calculation
+  totalCooks            Int          @default(0)
+  avgRating             Float?
+  status                String       @default("active") // active, archived
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  parentRecipe          Recipe?      @relation("RecipeVariants", fields: [parentRecipeId], references: [id])
+  variants              Recipe[]     @relation("RecipeVariants")
+  generationJob         GenerationJob? @relation(fields: [generationJobId], references: [id])
+  ingredients           RecipeIngredient[]
+  ratings               RecipeRating[]
+  cookingLogs           CookingLog[]
+  mealPlanEntries       MealPlanEntry[]
+
+  @@index([cuisine])
+  @@index([source])
+  @@index([parentRecipeId])
+  @@index([createdAt])
+  @@index([avgRating])
+}
+
+model RecipeIngredient {
+  id              String     @id @default(cuid())
+  recipeId        String
+  ingredientId    String
+  quantity        Float
+  unit            String
+  isOptional      Boolean    @default(false)
+  prepNote        String?    // "brunoise", "chiffonade", "rendered"
+  substituteGroup String?    // group ID for known substitution clusters
+
+  recipe          Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+
+  @@index([recipeId])
+  @@index([ingredientId])
+  @@unique([recipeId, ingredientId])
+}
+
+model RecipeRating {
+  id             String   @id @default(cuid())
+  userId         String
+  recipeId       String
+  rating         Int      // 1-5
+  difficultyFelt Int?     // 1-5
+  notes          String?
+  wouldMakeAgain Boolean?
+  cookedAt       DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe         Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, recipeId, cookedAt])
+  @@index([userId])
+  @@index([recipeId])
+}
+
+// ─────────────────────────────────────────────
+// GENERATION TRACKING
+// ─────────────────────────────────────────────
+
+model GenerationJob {
+  id              String              @id @default(cuid())
+  userId          String
+  trigger         GenerationTrigger
+  inputContext     Json               // { pantry, preferences, request, cuisineTarget, ... }
+  recipesGenerated Int                @default(0)
+  tokensUsed      Int                @default(0)
+  estimatedCost   Float              @default(0)
+  status          GenerationJobStatus @default(QUEUED)
+  errorMessage    String?
+  createdAt       DateTime            @default(now())
+  completedAt     DateTime?
+
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipes         Recipe[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([trigger])
+}
+
+// ─────────────────────────────────────────────
+// PURCHASING & RECEIPTS
+// ─────────────────────────────────────────────
+
+model PurchaseHistory {
+  id             String      @id @default(cuid())
+  userId         String
+  ingredientId   String
+  quantity       Float
+  unit           String
+  cost           Float
+  store          String?
+  purchasedAt    DateTime    @default(now())
+  receiptScanId  String?
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient     Ingredient  @relation(fields: [ingredientId], references: [id])
+  receiptScan    ReceiptScan? @relation(fields: [receiptScanId], references: [id])
+
+  @@index([userId])
+  @@index([ingredientId])
+  @@index([purchasedAt])
+}
+
+model ReceiptScan {
+  id                  String            @id @default(cuid())
+  userId              String
+  imageUrl            String
+  parsedItems         Json?             // [{ name, quantity, price, matched: bool, ingredientId? }]
+  status              ReceiptScanStatus @default(PENDING)
+  storeName           String?
+  receiptDate         DateTime?
+  totalAmount         Float?
+  generationTriggered Boolean           @default(false)
+  scannedAt           DateTime          @default(now())
+
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purchaseHistory     PurchaseHistory[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// PLANNING
+// ─────────────────────────────────────────────
+
+model GroceryList {
+  id             String            @id @default(cuid())
+  userId         String
+  name           String
+  status         GroceryListStatus @default(DRAFT)
+  estimatedTotal Float?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items          GroceryItem[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model GroceryItem {
+  id            String           @id @default(cuid())
+  listId        String
+  ingredientId  String
+  quantity      Float
+  unit          String
+  estimatedCost Float?
+  checked       Boolean          @default(false)
+  storeSection  String?
+  source        GroceryItemSource @default(MANUAL)
+
+  list          GroceryList      @relation(fields: [listId], references: [id], onDelete: Cascade)
+  ingredient    Ingredient       @relation(fields: [ingredientId], references: [id])
+
+  @@index([listId])
+}
+
+model MealPlan {
+  id        String          @id @default(cuid())
+  userId    String
+  weekStart DateTime
+  notes     String?
+  createdAt DateTime        @default(now())
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries   MealPlanEntry[]
+
+  @@index([userId])
+  @@unique([userId, weekStart])
+}
+
+model MealPlanEntry {
+  id             String   @id @default(cuid())
+  planId         String
+  recipeId       String
+  date           DateTime
+  mealType       MealType
+  scaledServings Int?
+
+  plan           MealPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  recipe         Recipe   @relation(fields: [recipeId], references: [id])
+
+  @@index([planId])
+  @@index([date])
+}
+
+model CookingLog {
+  id             String   @id @default(cuid())
+  userId         String
+  recipeId       String
+  cookedAt       DateTime @default(now())
+  actualPrepTime Int?     // minutes
+  actualCookTime Int?     // minutes
+  servingsCooked Int?
+  notes          String?
+  photoUrls      String[]
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe         Recipe   @relation(fields: [recipeId], references: [id])
+
+  @@index([userId])
+  @@index([recipeId])
+  @@index([cookedAt])
+}
+
+// ─────────────────────────────────────────────
+// PREFERENCE SIGNALS (THE DATA MOAT)
+// ─────────────────────────────────────────────
+
+model PreferenceSignal {
+  id         String           @id @default(cuid())
+  userId     String
+  signalType SignalType
+  entityType SignalEntityType
+  entityId   String
+  metadata   Json             @default("{}") // { rating: 5, modification: "added chili flakes", ... }
+  createdAt  DateTime         @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([signalType])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
+// GROWTH & EXPLORATION
+// ─────────────────────────────────────────────
+
+model TechniqueLog {
+  id             String    @id @default(cuid())
+  userId         String
+  technique      Technique
+  cuisine        Cuisine?
+  timesPerformed Int       @default(1)
+  lastPerformed  DateTime  @default(now())
+  comfortLevel   Int       @default(1) // 1-5
+  notes          String?
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, technique])
+  @@index([userId])
+}
+
+model CuisineExploration {
+  id               String            @id @default(cuid())
+  userId           String
+  cuisine          Cuisine
+  status           ExplorationStatus @default(NOT_STARTED)
+  recipesCompleted Int               @default(0)
+  starterKitData   Json?             // cached AI-generated starter kit
+  techniquePathData Json?            // cached technique progression
+  startedAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  starterItems     CuisineStarterItem[]
+
+  @@unique([userId, cuisine])
+  @@index([userId])
+}
+
+model CuisineStarterItem {
+  id             String              @id @default(cuid())
+  explorationId  String
+  ingredientId   String
+  priority       StarterItemPriority
+  purchased      Boolean             @default(false)
+  description    String?             // "Dried guajillo chiles -- mild, fruity backbone of many salsas"
+
+  exploration    CuisineExploration  @relation(fields: [explorationId], references: [id], onDelete: Cascade)
+  ingredient     Ingredient          @relation(fields: [ingredientId], references: [id])
+
+  @@index([explorationId])
+}
