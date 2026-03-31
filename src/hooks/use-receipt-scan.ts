@@ -60,8 +60,8 @@ export function useConfirmReceipt() {
       }
       return res.json();
     },
-    onSuccess: () => {
-      void invalidateQueriesAffectedByPantry(qc);
+    onSuccess: async () => {
+      await invalidateQueriesAffectedByPantry(qc);
     },
   });
 }

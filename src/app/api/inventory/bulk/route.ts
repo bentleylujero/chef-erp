@@ -3,6 +3,7 @@ import { IngredientCategory } from "@prisma/client";
 import { z } from "zod";
 import { addDays } from "date-fns";
 import { prisma } from "@/lib/prisma";
+import { scheduleNewIngredientRecipeGeneration } from "@/lib/engines/schedule-new-ingredient-recipes";
 
 const DEMO_USER_ID = "demo-user";
 
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
     let created = 0;
     let updated = 0;
     let ingredientsCreated = 0;
+    const newPantryIngredientIds: string[] = [];
 
     for (const row of parsed.data.items) {
       let ingredientId = row.ingredientId;
@@ -124,8 +126,11 @@ export async function POST(request: NextRequest) {
           },
         });
         created++;
+        newPantryIngredientIds.push(ingredientId);
       }
     }
+
+    scheduleNewIngredientRecipeGeneration(DEMO_USER_ID, newPantryIngredientIds);
 
     return NextResponse.json({
       created,

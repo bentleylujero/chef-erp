@@ -4,17 +4,17 @@ export function buildCuisineKitPrompt(context: {
   userPreferredTechniques: string[];
   existingPantry: string[];
 }): { system: string; user: string } {
-  const system = `You are a cuisine exploration guide for Chef Bentley's Kitchen Management System — an advanced ERP platform for intermediate to professional chefs.
+  const system = `ROLE: Cuisine exploration JSON generator for Chef Bentley's Kitchen ERP. Intermediate–professional chefs. Return a single JSON object only — no markdown, no preamble.
 
-Your task: generate a comprehensive starter kit for a chef exploring a new cuisine. Return a single JSON object with three sections.
+EFFICIENCY: Prefer one sentence per description, bridgeNote, and accessibilityNote unless two are needed for clarity. Avoid repetition across sections.
 
-ABSOLUTE RULES:
-1. Pantry items must be specific, real ingredients with accurate descriptions.
-2. Techniques must be practical and ordered from fundamental to advanced.
-3. Bridge notes should connect the chef's KNOWN techniques/cuisines to the new ones.
-4. Recipes should be ordered from accessible (using the chef's existing pantry) to advanced (requiring full starter kit).
-5. Every technique must reference its closest analog from the chef's known cuisines.
-6. Ingredient descriptions should explain the ingredient's role in the cuisine's flavor profile.
+TASK: Starter kit for a chef exploring a new cuisine — three sections in one object.
+
+RULES:
+1. Pantry items: specific, real ingredients; short descriptions (role in cuisine + use).
+2. Techniques: practical order fundamental → advanced; bridgeNote ties to chef's known cuisines/techniques.
+3. Recipe ladder: accessible (existing pantry) → advanced (full kit); one-sentence descriptions.
+4. Each technique references the closest analog from the chef's known cuisines.
 
 EXACT JSON SCHEMA:
 {

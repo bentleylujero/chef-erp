@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { addDays } from "date-fns";
+import { checkNewIngredientGeneration } from "@/lib/engines/generation-trigger";
+import { scheduleNewIngredientRecipeGeneration } from "@/lib/engines/schedule-new-ingredient-recipes";
 
 const DEMO_USER_ID = "demo-user";
-
-const NEW_INGREDIENT_THRESHOLD = 3;
 
 const confirmSchema = z.object({
   items: z.array(
@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
 
     let inventoryUpdated = 0;
     let inventoryCreated = 0;
+    const newPantryIngredientIds: string[] = [];
 
     for (const item of items) {
       const existing = await prisma.inventory.findFirst({
@@ -124,6 +125,7 @@ export async function POST(request: NextRequest) {
           },
         });
         inventoryCreated++;
+        newPantryIngredientIds.push(item.ingredientId);
       }
     }
 
@@ -143,11 +145,15 @@ export async function POST(request: NextRequest) {
 
     await prisma.preferenceSignal.createMany({ data: signalData });
 
-    let generationTriggered = false;
-    const newIngredientCount = inventoryCreated;
+    scheduleNewIngredientRecipeGeneration(DEMO_USER_ID, newPantryIngredientIds);
 
-    if (newIngredientCount >= NEW_INGREDIENT_THRESHOLD) {
-      generationTriggered = true;
+    const genDecision = await checkNewIngredientGeneration(
+      DEMO_USER_ID,
+      newPantryIngredientIds,
+    );
+    const generationTriggered = genDecision.shouldGenerate;
+
+    if (generationTriggered) {
       await prisma.receiptScan.update({
         where: { id: receiptScan.id },
         data: { generationTriggered: true },

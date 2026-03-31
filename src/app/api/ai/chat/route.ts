@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { openai } from "@/lib/openai";
+import { openai, OPENAI_MODEL_CHAT } from "@/lib/openai";
 import { buildSousChefSystemPrompt } from "@/lib/ai/chat-system-prompt";
 
 export async function POST(request: NextRequest) {
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     const systemPrompt = await buildSousChefSystemPrompt(userId);
 
     const stream = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: OPENAI_MODEL_CHAT,
       messages: [
         { role: "system", content: systemPrompt },
         ...messages.map((m) => ({
@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
         })),
       ],
       stream: true,
-      temperature: 0.7,
-      max_tokens: 2048,
+      temperature: 0.55,
+      max_tokens: 1200,
     });
 
     const encoder = new TextEncoder();

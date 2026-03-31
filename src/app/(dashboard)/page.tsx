@@ -171,8 +171,8 @@ export default function DashboardPage() {
           <Link href="/chat" className={buttonVariants({ variant: "outline" })}>
             Ask Sous Chef
           </Link>
-          <Link href="/topology" className={buttonVariants({ variant: "outline" })}>
-            Ingredient Map
+          <Link href="/food-web" className={buttonVariants({ variant: "outline" })}>
+            Food Web
           </Link>
         </CardContent>
       </Card>

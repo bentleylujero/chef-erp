@@ -6,6 +6,8 @@ export type { GraphMode };
 export interface GraphNode extends TopologyNode {
   x?: number;
   y?: number;
+  fx?: number | undefined;
+  fy?: number | undefined;
 }
 
 export interface HighlightSet {

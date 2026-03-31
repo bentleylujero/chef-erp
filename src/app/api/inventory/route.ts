@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { addDays } from "date-fns";
+import { scheduleNewIngredientRecipeGeneration } from "@/lib/engines/schedule-new-ingredient-recipes";
 
 const DEMO_USER_ID = "demo-user";
 
@@ -101,6 +102,8 @@ export async function POST(request: NextRequest) {
       },
       include: { ingredient: true },
     });
+
+    scheduleNewIngredientRecipeGeneration(DEMO_USER_ID, [data.ingredientId]);
 
     return NextResponse.json(item, { status: 201 });
   } catch {

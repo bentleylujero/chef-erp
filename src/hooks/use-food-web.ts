@@ -12,7 +12,7 @@ export type { FoodWebFilters };
 export function useFoodWeb(filters?: FoodWebFilters) {
   return useQuery<TopologyData>({
     queryKey: foodWebQueryKey(filters),
-    staleTime: 0,
+    staleTime: 5 * 60 * 1000, // 5 minutes – prevents spurious refetches that reset the graph
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters?.cuisine) params.set("cuisine", filters.cuisine);

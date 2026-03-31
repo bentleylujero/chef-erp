@@ -30,41 +30,13 @@ import {
 import type { GraphNode, GraphMode } from "./food-web-types";
 import {
   HUD,
-  WEB,
   CUISINES,
   CATEGORY_COLORS,
   CATEGORY_LABELS,
   CATEGORY_GROUPS,
   hexToRgba,
 } from "./food-web-constants";
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function HudCorners({ color = HUD.cyanDim }: { color?: string }) {
-  const s = { borderColor: color };
-  return (
-    <>
-      <span
-        className="pointer-events-none absolute top-0 left-0 h-2 w-2 border-t border-l"
-        style={s}
-      />
-      <span
-        className="pointer-events-none absolute top-0 right-0 h-2 w-2 border-t border-r"
-        style={s}
-      />
-      <span
-        className="pointer-events-none absolute bottom-0 left-0 h-2 w-2 border-b border-l"
-        style={s}
-      />
-      <span
-        className="pointer-events-none absolute bottom-0 right-0 h-2 w-2 border-b border-r"
-        style={s}
-      />
-    </>
-  );
-}
+import { HudCorners } from "./hud-corners";
 
 // ---------------------------------------------------------------------------
 // Stats HUD (top right)
@@ -232,6 +204,40 @@ export function FiltersPanel({
   monoClass,
 }: FiltersPanelProps) {
   const MONO = monoClass;
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!panelOpen) {
+    return (
+      <div className="absolute top-4 left-4 z-10">
+        <div
+          className="relative rounded-lg backdrop-blur-xl"
+          style={{
+            background: HUD.panel,
+            border: `1px solid ${HUD.border}`,
+          }}
+        >
+          <HudCorners />
+          <button
+            type="button"
+            onClick={() => setPanelOpen(true)}
+            className={cn(
+              MONO,
+              "flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors hover:text-[#94a3b8]",
+            )}
+            style={{ color: HUD.textMuted }}
+          >
+            <Network
+              className="size-3 shrink-0"
+              style={{ color: hexToRgba(HUD.cyan, 0.45) }}
+            />
+            Filters
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute top-4 left-4 z-10">
@@ -244,30 +250,57 @@ export function FiltersPanel({
       >
         <HudCorners />
 
-        <Select
-          value={cuisine ?? "__all__"}
-          onValueChange={(v) =>
-            setCuisine(!v || v === "__all__" ? undefined : v)
-          }
-        >
-          <SelectTrigger
+        {/* Close button */}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setPanelOpen(false)}
             className={cn(
               MONO,
-              "h-7 w-[160px] border-[#1a1a2e] bg-transparent text-[10px]",
+              "flex size-6 shrink-0 items-center justify-center rounded-md border border-transparent text-[#475569] transition-colors hover:border-[#1a1a2e] hover:bg-[#1a1a2e]/40 hover:text-[#94a3b8]",
+            )}
+            aria-label="Close filters"
+          >
+            <X className="size-3.5" strokeWidth={2} />
+          </button>
+        </div>
+
+        {mounted ? (
+          <Select
+            value={cuisine ?? "__all__"}
+            onValueChange={(v) =>
+              setCuisine(!v || v === "__all__" ? undefined : v)
+            }
+          >
+            <SelectTrigger
+              className={cn(
+                MONO,
+                "h-7 w-[160px] border-[#1a1a2e] bg-transparent text-[10px]",
+              )}
+              style={{ color: HUD.textMuted }}
+            >
+              <SelectValue placeholder="All cuisines" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All cuisines</SelectItem>
+              {CUISINES.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <div
+            className={cn(
+              MONO,
+              "flex h-7 w-[160px] items-center rounded-lg border border-[#1a1a2e] bg-transparent px-2.5 text-[10px]",
             )}
             style={{ color: HUD.textMuted }}
           >
-            <SelectValue placeholder="All cuisines" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All cuisines</SelectItem>
-            {CUISINES.map((c) => (
-              <SelectItem key={c.value} value={c.value}>
-                {c.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            All cuisines
+          </div>
+        )}
 
         <button
           type="button"
@@ -356,6 +389,13 @@ export function FiltersPanel({
           >
             Pantry bridge
           </div>
+          <p
+            className={cn(MONO, "text-[8px] leading-relaxed")}
+            style={{ color: HUD.textGhost }}
+          >
+            Finds pantry items with no recipe connections and generates AI
+            recipes to link them into your food web.
+          </p>
           {bridgeLoading ? (
             <div
               className={cn(MONO, "flex items-center gap-2 text-[9px]")}
@@ -402,6 +442,7 @@ export function FiltersPanel({
                     onError: (e) => toast.error(e.message),
                   });
                 }}
+                title="Generate AI recipes to connect unlinked pantry ingredients to your food web"
                 className={cn(
                   MONO,
                   "flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
@@ -431,6 +472,13 @@ export function FiltersPanel({
                 >
                   Network mesh
                 </div>
+                <p
+                  className={cn(MONO, "text-[8px] leading-relaxed")}
+                  style={{ color: HUD.textGhost }}
+                >
+                  Strengthens your web by generating multi-ingredient recipes
+                  around hub ingredients. Available every 6 hours.
+                </p>
                 {meshLoading ? (
                   <div
                     className={cn(
@@ -471,6 +519,7 @@ export function FiltersPanel({
                           onError: (e) => toast.error(e.message),
                         });
                       }}
+                      title="Generate multi-ingredient recipes to strengthen connections between hub ingredients (6hr cooldown)"
                       className={cn(
                         MONO,
                         "flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
@@ -655,7 +704,7 @@ export function Legend({
   monoClass,
 }: LegendProps) {
   const MONO = monoClass;
-  const [legendOpen, setLegendOpen] = useState(true);
+  const [legendOpen, setLegendOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const activeCatSet = useMemo(

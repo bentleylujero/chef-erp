@@ -54,6 +54,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   AI_EXPIRY_RESCUE: "Rescue",
   AI_PREFERENCE_DRIFT: "Evolved",
   AI_INGREDIENT_FILL: "Pantry Fill",
+  AI_PANTRY_BRIDGE: "Pantry Bridge",
+  AI_NETWORK_MESH: "Network Mesh",
   USER_CREATED: "Handmade",
   IMPORTED: "Imported",
 };

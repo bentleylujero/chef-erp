@@ -27,12 +27,14 @@ import {
   paintNode,
   paintNodeArea,
   paintLink,
+  paintLinkArea,
+  linkKey,
   nodeRadius,
   NODE_COLLIDE_PADDING,
   type PaintNodeContext,
   type PaintLinkContext,
 } from "./food-web-canvas";
-import { configureForces } from "./food-web-forces";
+import { configureForces, type PhysicsOverrides } from "./food-web-forces";
 import {
   TitleHud,
   StatsHud,
@@ -42,6 +44,7 @@ import {
   ModeSelector,
 } from "./food-web-hud";
 import FoodWebDetailSheet from "./food-web-detail-sheet";
+import { PhysicsPanel } from "./food-web-physics-panel";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -80,7 +83,10 @@ export default function FoodWebClient() {
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [discoverMode, setDiscoverMode] = useState(false);
   const [highlightedCategory, setHighlightedCategory] = useState<string | null>(null);
-  const [forceGraphReady, setForceGraphReady] = useState(false);
+  const [physicsOverrides, setPhysicsOverrides] = useState<PhysicsOverrides>({});
+  const [velocityDecay, setVelocityDecay] = useState(0.35);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [hoveredLink, setHoveredLink] = useState<any>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,15 +111,16 @@ export default function FoodWebClient() {
   const { data: meshStatus, isLoading: meshLoading } = useNetworkMesh();
   const meshGen = useNetworkMeshGenerate();
 
-  useEffect(() => {
-    setForceGraphReady(true);
-  }, []);
-
-  // ── Animation loop ───────────────────────────────────
+  // ── Animation loop — continuously repaint for particle transfer animations ──
   useEffect(() => {
     let raf: number;
     function tick(ts: number) {
       animTimeRef.current = ts;
+      // Force canvas repaint every frame so transfer particles animate smoothly
+      const fg = graphRef.current;
+      if (fg && typeof fg.tickFrame === "function") {
+        fg.tickFrame();
+      }
       raf = requestAnimationFrame(tick);
     }
     raf = requestAnimationFrame(tick);
@@ -154,7 +161,10 @@ export default function FoodWebClient() {
         ? data.nodes
         : data.nodes.filter((n) => linkedNodeIds.has(n.id))
     ).map((n) => ({ ...n })) as GraphNode[];
-    const links = data.links.map((l) => ({ ...l }));
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const links = data.links
+      .filter((l) => nodeIds.has(l.source) && nodeIds.has(l.target))
+      .map((l) => ({ ...l }));
     return {
       nodes,
       links,
@@ -325,32 +335,49 @@ export default function FoodWebClient() {
       maxSynergy,
       maxCookCount,
       graphMode,
+      physicsOverrides,
     );
-  }, [graphData, dimensions.width, dimensions.height, maxSynergy, maxCookCount, graphMode]);
+  }, [graphData, dimensions.width, dimensions.height, maxSynergy, maxCookCount, graphMode, physicsOverrides]);
+
+  // Track whether user has manually zoomed/panned — if so, don't auto-fit
+  const userInteractedRef = useRef(false);
+  const initialFitDoneRef = useRef(false);
+
+  // Auto-fit the graph once warmup ticks complete and nodes have positions.
+  // We use a short delay after data arrives so the warmup simulation has run.
+  useEffect(() => {
+    if (!graphData.nodes.length || initialFitDoneRef.current) return;
+    const fg = graphRef.current;
+    if (!fg) return;
+
+    // After warmup ticks run the graph will have positions — fit immediately
+    const timer = setTimeout(() => {
+      if (!userInteractedRef.current) {
+        fg.zoomToFit(600, fitPadding);
+        initialFitDoneRef.current = true;
+        entryStartRef.current = animTimeRef.current;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [graphData.nodes.length, fitPadding]);
 
   const handleEngineStop = useCallback(() => {
     const fg = graphRef.current;
     if (!fg || graphData.nodes.length === 0) return;
     entryStartRef.current = animTimeRef.current;
-    requestAnimationFrame(() => {
-      fg.zoomToFit(450, fitPadding);
-    });
+    // Second fit after simulation settles for final positions
+    if (!userInteractedRef.current) {
+      requestAnimationFrame(() => {
+        fg.zoomToFit(450, fitPadding);
+      });
+    }
   }, [fitPadding, graphData.nodes.length]);
 
+  // Reset interaction tracking when data changes (new filter, mode switch)
   useEffect(() => {
-    const fg = graphRef.current;
-    if (!fg || graphData.nodes.length === 0 || isLoading) return;
-    const id = requestAnimationFrame(() => {
-      fg.zoomToFit(280, fitPadding);
-    });
-    return () => cancelAnimationFrame(id);
-  }, [
-    dimensions.width,
-    dimensions.height,
-    fitPadding,
-    graphData.nodes.length,
-    isLoading,
-  ]);
+    userInteractedRef.current = false;
+    initialFitDoneRef.current = false;
+  }, [showUnlinked, graphMode, dataUpdatedAt]);
 
   // ── Canvas callbacks ─────────────────────────────────
   const paintNodeCb = useCallback(
@@ -385,6 +412,8 @@ export default function FoodWebClient() {
     [maxSynergy, maxCookCount],
   );
 
+  const hoveredLinkKey = hoveredLink ? linkKey(hoveredLink) : null;
+
   const paintLinkCb = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any, ctx: CanvasRenderingContext2D) => {
@@ -392,10 +421,20 @@ export default function FoodWebClient() {
         highlightSet,
         animTime: animTimeRef.current,
         maxWeight,
+        hoveredLinkKey,
+        displayFontFamily: DISPLAY_CANVAS,
       };
       paintLink(link, ctx, plctx);
     },
-    [highlightSet, maxWeight],
+    [highlightSet, maxWeight, hoveredLinkKey],
+  );
+
+  const paintLinkAreaCb = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (link: any, paintColor: string, ctx: CanvasRenderingContext2D) => {
+      paintLinkArea(link, paintColor, ctx);
+    },
+    [],
   );
 
   // ── Post-render: draw discover mode ghost edges ──────
@@ -435,10 +474,62 @@ export default function FoodWebClient() {
   const handleNodeHover = useCallback((node: GraphNode | null) => {
     setHoveredNode(node ?? null);
     setHighlightedCategory(null);
+    const el = containerRef.current;
+    if (el) {
+      el.style.cursor = node ? "grab" : "default";
+    }
+  }, []);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleLinkHover = useCallback((link: any) => {
+    setHoveredLink(link ?? null);
+    const el = containerRef.current;
+    if (el && !hoveredNode) {
+      el.style.cursor = link ? "pointer" : "default";
+    }
+  }, [hoveredNode]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleLinkClick = useCallback((link: any) => {
+    if (link?.source) {
+      setSelectedNode(link.source);
+    }
   }, []);
 
   const handleNodeClick = useCallback((node: GraphNode) => {
     setSelectedNode(node ?? null);
+  }, []);
+
+  const handleNodeDrag = useCallback((node: GraphNode) => {
+    userInteractedRef.current = true;
+  }, []);
+
+  const handleNodeDragEnd = useCallback((node: GraphNode) => {
+    // Pin node where user dropped it
+    node.fx = node.x;
+    node.fy = node.y;
+  }, []);
+
+  // Double-click background to unpin all nodes and re-fit
+  const handleBackgroundClick = useCallback(() => {
+    setHoveredNode(null);
+    setHighlightedCategory(null);
+  }, []);
+
+  const handleBackgroundRightClick = useCallback(() => {
+    // Right-click background: unpin all nodes
+    for (const node of graphData.nodes) {
+      (node as GraphNode).fx = undefined;
+      (node as GraphNode).fy = undefined;
+    }
+    const fg = graphRef.current;
+    if (fg) {
+      fg.d3ReheatSimulation();
+    }
+  }, [graphData.nodes]);
+
+  const handleZoom = useCallback(() => {
+    userInteractedRef.current = true;
   }, []);
 
   const handleSearchSelect = useCallback((node: GraphNode) => {
@@ -461,7 +552,7 @@ export default function FoodWebClient() {
 
   // ── Render ───────────────────────────────────────────
   return (
-    <div className="relative flex h-[calc(100vh-7.5rem)] flex-col overflow-hidden">
+    <div className="relative flex h-[calc(100vh-4rem)] flex-col overflow-hidden">
       {/* ═══════════════════════════════════════════════
           FULL-BLEED GRAPH CONTAINER
           ═══════════════════════════════════════════════ */}
@@ -475,11 +566,34 @@ export default function FoodWebClient() {
             backgroundSize: "24px 24px",
           }}
         />
-        {/* Vignette */}
+        {/* Vignette — subtle so the graph doesn't feel boxed in */}
         <div
           className="pointer-events-none absolute inset-0"
           style={{
-            background: `radial-gradient(ellipse at center, transparent 0%, ${hexToRgba(WEB.canvasBg, 0.15)} 45%, ${hexToRgba("#111114", 0.9)} 100%)`,
+            background: `radial-gradient(ellipse at center, transparent 0%, ${hexToRgba(WEB.canvasBg, 0.08)} 60%, ${hexToRgba("#111114", 0.4)} 100%)`,
+          }}
+        />
+
+        {/* Persistent ambient animations */}
+        {/* Slow rotating scan line */}
+        <div
+          className="pointer-events-none absolute inset-0 animate-[spin_20s_linear_infinite] opacity-[0.03]"
+          style={{
+            background: `conic-gradient(from 0deg at 50% 50%, transparent 0deg, ${HUD.cyan} 2deg, transparent 4deg)`,
+          }}
+        />
+        {/* Pulsing radial glow */}
+        <div
+          className="pointer-events-none absolute inset-0 animate-[pulse_6s_ease-in-out_infinite]"
+          style={{
+            background: `radial-gradient(circle at 50% 50%, ${hexToRgba(HUD.cyan, 0.03)} 0%, transparent 50%)`,
+          }}
+        />
+        {/* Drifting secondary glow */}
+        <div
+          className="pointer-events-none absolute inset-0 animate-[drift_12s_ease-in-out_infinite]"
+          style={{
+            background: `radial-gradient(ellipse at 30% 70%, ${hexToRgba("#a855f7", 0.025)} 0%, transparent 40%), radial-gradient(ellipse at 70% 30%, ${hexToRgba(HUD.cyan, 0.02)} 0%, transparent 40%)`,
           }}
         />
 
@@ -541,15 +655,9 @@ export default function FoodWebClient() {
               Lower minimum strength or adjust filters
             </p>
           </div>
-        ) : !forceGraphReady ? (
-          <div
-            className="absolute inset-0"
-            style={{ minWidth: dimensions.width, minHeight: dimensions.height }}
-            aria-busy="true"
-          />
         ) : (
           <ForceGraph2D
-            key={`${dataUpdatedAt}-${showUnlinked ? "all" : "linked"}-${graphMode}`}
+            key={`${showUnlinked ? "all" : "linked"}-${graphMode}`}
             ref={graphRef}
             width={dimensions.width}
             height={dimensions.height}
@@ -566,17 +674,28 @@ export default function FoodWebClient() {
             nodePointerAreaPaint={paintNodeAreaCb as never}
             linkCanvasObject={paintLinkCb as never}
             linkCanvasObjectMode={() => "replace" as const}
+            linkPointerAreaPaint={paintLinkAreaCb as never}
+            linkHoverPrecision={6}
+            onLinkHover={handleLinkHover as never}
+            onLinkClick={handleLinkClick as never}
             onNodeHover={handleNodeHover as never}
             onNodeClick={handleNodeClick as never}
+            onNodeDrag={handleNodeDrag as never}
+            onNodeDragEnd={handleNodeDragEnd as never}
             onEngineStop={handleEngineStop as never}
             onRenderFramePost={onRenderFramePost as never}
-            warmupTicks={220}
-            cooldownTicks={560}
-            d3VelocityDecay={0.26}
+            onZoom={handleZoom as never}
+            onBackgroundClick={handleBackgroundClick as never}
+            onBackgroundRightClick={handleBackgroundRightClick as never}
+            enableNodeDrag={true}
+            warmupTicks={80}
+            cooldownTicks={200}
+            cooldownTime={4000}
+            d3VelocityDecay={velocityDecay}
             enableZoomInteraction={true}
             enablePanInteraction={true}
-            minZoom={0.15}
-            maxZoom={8}
+            minZoom={0.1}
+            maxZoom={12}
           />
         )}
 
@@ -634,6 +753,19 @@ export default function FoodWebClient() {
             activeCategories={activeCategories}
             categoryCounts={categoryCounts}
             onHighlightCategory={handleHighlightCategory}
+            monoClass={MONO}
+          />
+        )}
+
+        {/* Physics panel */}
+        {!isLoading && graphData.nodes.length > 0 && (
+          <PhysicsPanel
+            overrides={physicsOverrides}
+            setOverrides={setPhysicsOverrides}
+            velocityDecay={velocityDecay}
+            setVelocityDecay={setVelocityDecay}
+            nodeCount={graphData.nodes.length}
+            graphRef={graphRef}
             monoClass={MONO}
           />
         )}

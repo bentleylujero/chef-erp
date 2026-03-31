@@ -1,6 +1,6 @@
 import Fuse from "fuse.js";
 import { IngredientCategory } from "@prisma/client";
-import { openai } from "@/lib/openai";
+import { openai, OPENAI_MODEL_JSON } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 
 export interface PantryParsedItem {
@@ -71,9 +71,11 @@ function normalizePantryUnit(raw: string | undefined): "count" | "g" | "ml" {
   return "count";
 }
 
-const PANTRY_LIST_SYSTEM = `You normalize informal pantry or grocery lists into structured ingredients for a kitchen inventory app. Use a SIMPLE quantity model — do not infer grams or milliliters unless the shopper actually wrote a weight or volume.
+const PANTRY_LIST_SYSTEM = `ROLE: Pantry-list normalizer for Chef Bentley's Kitchen ERP. Emit ONLY valid JSON (no markdown). Be concise in string fields.
 
-Return ONLY valid JSON with this shape:
+You normalize informal pantry or grocery lists into structured ingredients. Use a SIMPLE quantity model — do not infer grams or milliliters unless the shopper actually wrote a weight or volume.
+
+JSON shape:
 { "items": [ { "rawLine": "verbatim or closest user phrase", "name": "Canonical ingredient name (Title Case, specific)", "quantity": 1, "unit": "count"|"g"|"ml", "category": "ENUM" } ] }
 
 category MUST be exactly one of: ${CATEGORY_LIST}
@@ -99,7 +101,7 @@ export async function parsePantryListPaste(rawText: string): Promise<PantryParse
   if (!trimmed) return [];
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: OPENAI_MODEL_JSON,
     messages: [
       { role: "system", content: PANTRY_LIST_SYSTEM },
       {

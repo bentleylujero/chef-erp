@@ -9,18 +9,23 @@ import {
 
 /**
  * Refetch everything that reads pantry/inventory or new ingredients from bulk add.
+ * Uses refetchType "all" so inactive routes (e.g. Food Web while you're on Pantry)
+ * refresh in the background — navigation then sees current data, not a stale cache.
  */
 export function invalidateQueriesAffectedByPantry(qc: QueryClient) {
+  const refetchAll = { refetchType: "all" as const };
   return Promise.all([
-    qc.invalidateQueries({ queryKey: ["inventory"] }),
-    qc.invalidateQueries({ queryKey: ["topology"] }),
-    qc.invalidateQueries({ queryKey: ["insights"] }),
-    qc.invalidateQueries({ queryKey: ["recipe-matches"] }),
-    qc.invalidateQueries({ queryKey: ["grocery-lists"] }),
-    qc.invalidateQueries({ queryKey: ["grocery-list"] }),
-    qc.invalidateQueries({ queryKey: ["ingredients"] }),
-    qc.invalidateQueries({ queryKey: ["recipes"] }),
-    qc.invalidateQueries({ queryKey: ["cuisine-exploration"] }),
+    qc.invalidateQueries({ queryKey: ["inventory"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["food-web"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["pantry-bridge"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["network-mesh"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["insights"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["recipe-matches"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["grocery-lists"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["grocery-list"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["ingredients"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["recipes"], ...refetchAll }),
+    qc.invalidateQueries({ queryKey: ["cuisine-exploration"], ...refetchAll }),
   ]);
 }
 
@@ -113,8 +118,8 @@ export function useAddInventory() {
       if (!res.ok) throw new Error("Failed to add item");
       return res.json();
     },
-    onSuccess: () => {
-      void invalidateQueriesAffectedByPantry(qc);
+    onSuccess: async () => {
+      await invalidateQueriesAffectedByPantry(qc);
     },
   });
 }
@@ -161,8 +166,8 @@ export function useBulkAddInventory(options?: {
         processed: number;
       };
     },
-    onSuccess: () => {
-      if (cascadeInvalidation) void invalidateQueriesAffectedByPantry(qc);
+    onSuccess: async () => {
+      if (cascadeInvalidation) await invalidateQueriesAffectedByPantry(qc);
     },
   });
 }
@@ -191,8 +196,8 @@ export function useUpdateInventory() {
       if (!res.ok) throw new Error("Failed to update item");
       return res.json();
     },
-    onSuccess: () => {
-      void invalidateQueriesAffectedByPantry(qc);
+    onSuccess: async () => {
+      await invalidateQueriesAffectedByPantry(qc);
     },
   });
 }
@@ -205,8 +210,8 @@ export function useDeleteInventory() {
       if (!res.ok) throw new Error("Failed to delete item");
       return res.json();
     },
-    onSuccess: () => {
-      void invalidateQueriesAffectedByPantry(qc);
+    onSuccess: async () => {
+      await invalidateQueriesAffectedByPantry(qc);
     },
   });
 }

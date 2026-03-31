@@ -50,7 +50,7 @@ const intelligenceNav = [
 ];
 
 const analyticsNav = [
-  { title: "Topology Map", href: "/topology", icon: Network },
+  { title: "Food Web", href: "/food-web", icon: Network },
   { title: "Insights", href: "/insights", icon: LineChart },
   { title: "Techniques", href: "/profile/techniques", icon: Scale },
 ];

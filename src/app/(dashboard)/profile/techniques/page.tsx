@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import Link from "next/link";
+import {
+  Suspense,
+  useState,
+  useMemo,
+  useEffect,
+} from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Flame,
@@ -191,7 +198,43 @@ function TechniqueHeatmap({ techniques }: { techniques: TechniqueLog[] }) {
   );
 }
 
-export default function TechniqueMasteryPage() {
+function normalizeTechniqueFocus(raw: string | null): string | null {
+  if (!raw?.trim()) return null;
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+}
+
+function TechniqueMasterySkeleton() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Technique Mastery
+        </h1>
+        <p className="text-muted-foreground mt-1">
+          Track your techniques across cuisines.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+      </div>
+      <Skeleton className="h-96" />
+    </div>
+  );
+}
+
+function TechniqueMasteryInner() {
+  const searchParams = useSearchParams();
+  const focusTechnique = useMemo(
+    () => normalizeTechniqueFocus(searchParams.get("focus")),
+    [searchParams],
+  );
+
   const [view, setView] = useState<"grid" | "table" | "heatmap">("grid");
   const [groupBy, setGroupBy] = useState<"comfort" | "cuisine">("comfort");
   const [sortField, setSortField] = useState<"comfort" | "times" | "recent">(
@@ -208,6 +251,27 @@ export default function TechniqueMasteryPage() {
   });
 
   const techniques = profile?.techniqueLogs ?? [];
+
+  const focusRow = useMemo(
+    () =>
+      focusTechnique
+        ? techniques.find((t) => t.technique === focusTechnique)
+        : undefined,
+    [techniques, focusTechnique],
+  );
+
+  useEffect(() => {
+    if (!focusTechnique || !focusRow || isLoading) return;
+    if (view === "heatmap") return;
+    const id = `technique-${focusTechnique}`;
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, [focusTechnique, focusRow, isLoading, view, techniques.length]);
 
   const sorted = useMemo(() => {
     return [...techniques].sort((a, b) => {
@@ -267,9 +331,25 @@ export default function TechniqueMasteryPage() {
           Technique Mastery
         </h1>
         <p className="text-muted-foreground mt-1">
-          Track your techniques across cuisines.
+          Track your techniques across cuisines. Each saved cook from{" "}
+          <strong className="font-medium text-foreground">Cook This</strong>{" "}
+          increments the techniques on that recipe.
         </p>
       </div>
+
+      {focusTechnique && !isLoading && !focusRow && (
+        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm">
+          <p className="text-foreground">
+            <strong>{formatTechnique(focusTechnique)}</strong> will show up here
+            after you finish a recipe that uses it and tap{" "}
+            <strong>Log &amp; finish</strong> in{" "}
+            <Link href="/cookbook" className="text-primary underline-offset-4 hover:underline">
+              Cook This
+            </Link>
+            .
+          </p>
+        </div>
+      )}
 
       {/* Summary Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -436,8 +516,16 @@ export default function TechniqueMasteryPage() {
               </h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {items.map((t) => (
-                  <Card key={t.id}>
-                    <CardContent className="p-4 space-y-3">
+                  <Card
+                    key={t.id}
+                    id={`technique-${t.technique}`}
+                    className={cn(
+                      "scroll-mt-24 transition-shadow",
+                      focusTechnique === t.technique &&
+                        "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                    )}
+                  >
+                    <CardContent className="space-y-3 p-4">
                       <div className="flex items-start justify-between">
                         <div>
                           <h4 className="font-semibold text-sm">
@@ -516,7 +604,14 @@ export default function TechniqueMasteryPage() {
                   </TableRow>
                 ) : (
                   sorted.map((t) => (
-                    <TableRow key={t.id}>
+                    <TableRow
+                      key={t.id}
+                      id={`technique-${t.technique}`}
+                      className={cn(
+                        focusTechnique === t.technique &&
+                          "bg-primary/5 ring-1 ring-inset ring-primary/30",
+                      )}
+                    >
                       <TableCell className="font-medium text-sm">
                         {formatTechnique(t.technique)}
                       </TableCell>
@@ -563,5 +658,13 @@ export default function TechniqueMasteryPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+export default function TechniqueMasteryPage() {
+  return (
+    <Suspense fallback={<TechniqueMasterySkeleton />}>
+      <TechniqueMasteryInner />
+    </Suspense>
   );
 }

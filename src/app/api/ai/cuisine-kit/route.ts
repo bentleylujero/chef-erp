@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { openai } from "@/lib/openai";
+import { openai, OPENAI_MODEL_JSON } from "@/lib/openai";
 import { z } from "zod";
 import { buildCuisineKitPrompt } from "@/lib/ai/cuisine-kit-prompt";
 
@@ -91,13 +91,13 @@ export async function POST(request: NextRequest) {
     });
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: OPENAI_MODEL_JSON,
       messages: [
         { role: "system", content: prompt.system },
         { role: "user", content: prompt.user },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.7,
+      temperature: 0.55,
     });
 
     const raw = completion.choices[0]?.message?.content;

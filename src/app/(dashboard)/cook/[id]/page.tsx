@@ -505,6 +505,7 @@ export default function CookingModePage() {
     onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["recipe", variables.recipeId] });
       await queryClient.invalidateQueries({ queryKey: ["recipes"] });
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
       router.push(`/cookbook/${variables.recipeId}`);
     },
   });

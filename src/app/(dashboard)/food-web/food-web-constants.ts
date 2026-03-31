@@ -18,12 +18,12 @@ export const HUD = {
 
 /** Obsidian graph-inspired canvas palette. */
 export const WEB = {
-  canvasBg: "#1a1a20",
+  canvasBg: "#141418",
   edge: "rgba(200, 205, 218, 0.28)",
   edgeDim: "rgba(200, 205, 218, 0.12)",
   edgeHover: "rgba(230, 235, 240, 0.42)",
   edgeGlow: "rgba(230, 235, 240, 0.08)",
-  dotNoise: "rgba(255, 255, 255, 0.025)",
+  dotNoise: "rgba(255, 255, 255, 0.018)",
   label: "#d0d0d0",
   labelMuted: "#8c8c8c",
 } as const;

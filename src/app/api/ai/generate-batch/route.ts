@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import Fuse from "fuse.js";
 import { prisma } from "@/lib/prisma";
-import { openai } from "@/lib/openai";
+import {
+  openai,
+  OPENAI_MODEL_JSON,
+  estimateOpenAiChatCostUsd,
+} from "@/lib/openai";
 import { generatedRecipeSchema } from "@/lib/ai/output-schemas";
 import { buildBatchGenerationPrompt } from "@/lib/ai/generation-prompts";
 import { isDuplicate } from "@/lib/engines/deduplicator";
+import {
+  checkNetworkMeshGeneration,
+  checkPantryBridgeGeneration,
+} from "@/lib/engines/generation-trigger";
+import { sortIngredientPairIds } from "@/lib/engines/pantry-bridge-heuristics";
+import { getPantryNetworkHubIngredientNames } from "@/lib/engines/topology-builder";
 import type {
   Cuisine,
   Technique,
@@ -15,6 +25,8 @@ import type {
 const TRIGGER_TO_SOURCE: Record<string, RecipeSource> = {
   ONBOARDING_BATCH: "AI_BATCH",
   NEW_INGREDIENTS: "AI_INGREDIENT_FILL",
+  PANTRY_BRIDGE: "AI_PANTRY_BRIDGE",
+  NETWORK_MESH: "AI_NETWORK_MESH",
   CUISINE_EXPLORATION: "AI_CUISINE_EXPLORE",
   PREFERENCE_DRIFT: "AI_PREFERENCE_DRIFT",
   EXPIRY_RESCUE: "AI_EXPIRY_RESCUE",
@@ -26,6 +38,8 @@ const TRIGGER_TO_SOURCE: Record<string, RecipeSource> = {
 const VALID_TRIGGERS = new Set<string>([
   "ONBOARDING_BATCH",
   "NEW_INGREDIENTS",
+  "PANTRY_BRIDGE",
+  "NETWORK_MESH",
   "CUISINE_EXPLORATION",
   "PREFERENCE_DRIFT",
   "EXPIRY_RESCUE",
@@ -33,6 +47,13 @@ const VALID_TRIGGERS = new Set<string>([
   "MANUAL_REQUEST",
   "INGREDIENT_FILL",
 ]);
+
+interface PantryBridgePairPayload {
+  ingredientIdA: string;
+  ingredientIdB: string;
+  nameA: string;
+  nameB: string;
+}
 
 const VALID_CUISINES = new Set<string>([
   "FRENCH",
@@ -116,11 +137,20 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { userId, trigger, targetCuisine, count: rawCount } = body as {
+    const {
+      userId,
+      trigger,
+      targetCuisine,
+      count: rawCount,
+      bridgePairs: rawBridgePairs,
+      focusIngredientIds: rawFocusIds,
+    } = body as {
       userId: string;
       trigger: string;
       targetCuisine?: string;
       count?: number;
+      bridgePairs?: PantryBridgePairPayload[];
+      focusIngredientIds?: string[];
     };
 
     if (!userId || !trigger) {
@@ -137,7 +167,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const count = Math.max(1, Math.min(rawCount ?? 10, 20));
+    let bridgePairs: PantryBridgePairPayload[] | undefined = rawBridgePairs;
+    let count = Math.max(1, Math.min(rawCount ?? 10, 20));
+
+    if (trigger === "PANTRY_BRIDGE") {
+      if (!bridgePairs?.length) {
+        const decision = await checkPantryBridgeGeneration(userId);
+        if (!decision.shouldGenerate) {
+          return NextResponse.json(
+            { error: decision.reason },
+            { status: 400 },
+          );
+        }
+        bridgePairs = decision.context.bridgePairs as PantryBridgePairPayload[];
+      }
+      count = Math.max(1, Math.min(bridgePairs!.length, 20));
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -161,6 +206,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (trigger === "NETWORK_MESH") {
+      const decision = await checkNetworkMeshGeneration(userId);
+      if (!decision.shouldGenerate) {
+        return NextResponse.json(
+          { error: decision.reason },
+          { status: 400 },
+        );
+      }
+      count = decision.count;
+    }
+
+    let networkHubIngredientNames: string[] | undefined;
+    let bridgeMinDistinctIngredients: number | undefined;
+    if (
+      (trigger === "PANTRY_BRIDGE" && bridgePairs?.length) ||
+      trigger === "NETWORK_MESH"
+    ) {
+      networkHubIngredientNames = await getPantryNetworkHubIngredientNames(
+        userId,
+        28,
+      );
+      const n = user.inventory.length;
+      bridgeMinDistinctIngredients =
+        trigger === "NETWORK_MESH"
+          ? Math.min(Math.max(5, Math.min(8, n)), n)
+          : Math.min(Math.max(3, Math.min(8, n)), n);
+    }
+
     const job = await prisma.generationJob.create({
       data: {
         userId,
@@ -169,14 +242,75 @@ export async function POST(request: NextRequest) {
           pantrySize: user.inventory.length,
           targetCuisine: targetCuisine ?? null,
           requestedCount: count,
+          pantryBridge:
+            trigger === "PANTRY_BRIDGE" && bridgePairs
+              ? bridgePairs.map((p) => ({
+                  a: p.nameA,
+                  b: p.nameB,
+                }))
+              : undefined,
+          pantryBridgeNetworkHubs:
+            networkHubIngredientNames?.slice(0, 14) ?? null,
+          bridgeMinDistinctIngredients: bridgeMinDistinctIngredients ?? null,
+          networkMesh: trigger === "NETWORK_MESH" ? true : null,
         },
         status: "RUNNING",
       },
     });
     jobId = job.id;
 
+    // Resolve focus ingredient names for NEW_INGREDIENTS trigger
+    let focusIngredientNames: string[] | undefined;
+    if (trigger === "NEW_INGREDIENTS" && rawFocusIds?.length) {
+      const focusIngredients = await prisma.ingredient.findMany({
+        where: { id: { in: rawFocusIds } },
+        select: { id: true, name: true },
+      });
+      focusIngredientNames = focusIngredients.map((i) => i.name);
+
+      // Cache check: if every focus ingredient already has an active recipe, skip the AI call
+      const existingCoverage = await prisma.recipeIngredient.findMany({
+        where: {
+          ingredientId: { in: rawFocusIds },
+          recipe: { status: "active" },
+        },
+        select: { ingredientId: true, recipeId: true },
+        distinct: ["ingredientId"],
+      });
+
+      const coveredIds = new Set(existingCoverage.map((r) => r.ingredientId));
+      const stillUncovered = rawFocusIds.filter((id) => !coveredIds.has(id));
+
+      if (stillUncovered.length === 0) {
+        // All focus ingredients already have recipes — return cached recipes
+        const cachedRecipeIds = [
+          ...new Set(existingCoverage.map((r) => r.recipeId)),
+        ];
+        const cachedRecipes = await prisma.recipe.findMany({
+          where: { id: { in: cachedRecipeIds }, status: "active" },
+          include: { ingredients: { include: { ingredient: true } } },
+        });
+
+        return NextResponse.json({
+          jobId: null,
+          recipesGenerated: 0,
+          recipes: cachedRecipes,
+          cached: true,
+          tokensUsed: 0,
+          estimatedCost: 0,
+          reason:
+            "All focus ingredients already have recipe coverage — returning existing recipes",
+        });
+      }
+
+      // Narrow focus to only the still-uncovered ingredients
+      focusIngredientNames = focusIngredients
+        .filter((i) => stillUncovered.includes(i.id))
+        .map((i) => i.name);
+    }
+
     const existingRecipes = await prisma.recipe.findMany({
-      where: { generationJob: { userId } },
+      where: { status: "active" },
       select: { title: true },
     });
 
@@ -200,16 +334,25 @@ export async function POST(request: NextRequest) {
       targetCuisine,
       count,
       existingTitles: existingRecipes.map((r) => r.title),
+      pantryBridgePairs:
+        trigger === "PANTRY_BRIDGE" && bridgePairs?.length
+          ? bridgePairs.map((p) => ({ nameA: p.nameA, nameB: p.nameB }))
+          : undefined,
+      bridgeMinDistinctIngredients,
+      networkHubIngredientNames,
+      networkMeshMode: trigger === "NETWORK_MESH",
+      focusIngredientNames:
+        trigger === "NEW_INGREDIENTS" ? focusIngredientNames : undefined,
     });
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: OPENAI_MODEL_JSON,
       messages: [
         { role: "system", content: prompt.system },
         { role: "user", content: prompt.user },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.8,
+      temperature: 0.55,
     });
 
     const content = completion.choices[0]?.message?.content;
@@ -218,8 +361,11 @@ export async function POST(request: NextRequest) {
     const tokensUsed = completion.usage?.total_tokens ?? 0;
     const promptTokens = completion.usage?.prompt_tokens ?? 0;
     const completionTokens = completion.usage?.completion_tokens ?? 0;
-    const estimatedCost =
-      (promptTokens * 2.5 + completionTokens * 10) / 1_000_000;
+    const estimatedCost = estimateOpenAiChatCostUsd(
+      OPENAI_MODEL_JSON,
+      promptTokens,
+      completionTokens,
+    );
 
     let rawData: Record<string, unknown>;
     try {
@@ -243,6 +389,30 @@ export async function POST(request: NextRequest) {
 
     const pantrySnapshot = user.inventory.map((inv) => inv.ingredientId);
     const source = (TRIGGER_TO_SOURCE[trigger] ?? "AI_BATCH") as RecipeSource;
+
+    const isMesh = trigger === "NETWORK_MESH";
+    const isBridge =
+      trigger === "PANTRY_BRIDGE" && bridgePairs && bridgePairs.length > 0;
+    const remainingBridgePairs = isBridge
+      ? bridgePairs!.map((p) => {
+          const [ingredientIdA, ingredientIdB] = sortIngredientPairIds(
+            p.ingredientIdA,
+            p.ingredientIdB,
+          );
+          return { ...p, ingredientIdA, ingredientIdB };
+        })
+      : null;
+
+    const pantryIdToName = new Map(
+      user.inventory.map((inv) => [inv.ingredient.id, inv.ingredient.name]),
+    );
+    const pantryCategoryById = new Map(
+      user.inventory.map((inv) => [
+        inv.ingredient.id,
+        inv.ingredient.category,
+      ]),
+    );
+    const hubNameSet = new Set(networkHubIngredientNames ?? []);
 
     const createdRecipes: Awaited<ReturnType<typeof prisma.recipe.create>>[] =
       [];
@@ -293,6 +463,123 @@ export async function POST(request: NextRequest) {
       if (matchedIngredients.length < recipe.ingredients.length * 0.5) continue;
 
       const techniques = dedupe(recipe.techniques.map(toTechnique));
+
+      if (isBridge) {
+        if (!remainingBridgePairs?.length) continue;
+
+        const matchedIds = new Set(
+          matchedIngredients.map((m) => m.ingredientId),
+        );
+        const pairIdx = remainingBridgePairs.findIndex(
+          (p) =>
+            matchedIds.has(p.ingredientIdA) && matchedIds.has(p.ingredientIdB),
+        );
+        if (pairIdx === -1) continue;
+
+        const minDist = bridgeMinDistinctIngredients ?? 3;
+        if (matchedIngredients.length < minDist) continue;
+
+        if (hubNameSet.size >= 2) {
+          const hubMatchCount = matchedIngredients.filter((m) =>
+            hubNameSet.has(pantryIdToName.get(m.ingredientId) ?? ""),
+          ).length;
+          if (hubMatchCount < 2) continue;
+        }
+
+        const [consumedPair] = remainingBridgePairs.splice(pairIdx, 1);
+
+        try {
+          const created = await prisma.recipe.create({
+            data: {
+              title: recipe.title,
+              description: recipe.description,
+              cuisine: cuisineEnum,
+              difficulty: recipe.difficulty,
+              techniques,
+              instructions: recipe.instructions as object[],
+              prepTime: recipe.prepTime,
+              cookTime: recipe.cookTime,
+              servings: recipe.servings,
+              flavorTags: recipe.flavorTags,
+              tags: recipe.tags,
+              source,
+              generationJobId: jobId,
+              pantrySnapshotAtGen: pantrySnapshot,
+              ingredients: { create: matchedIngredients },
+            },
+            include: {
+              ingredients: { include: { ingredient: true } },
+            },
+          });
+          createdRecipes.push(created);
+          try {
+            await prisma.pantryBridgeAttempt.create({
+              data: {
+                userId,
+                ingredientAId: consumedPair.ingredientIdA,
+                ingredientBId: consumedPair.ingredientIdB,
+                generationJobId: jobId,
+              },
+            });
+          } catch {
+            // Unique violation — pair already recorded for this user
+          }
+        } catch {
+          remainingBridgePairs.splice(pairIdx, 0, consumedPair);
+        }
+        continue;
+      }
+
+      if (isMesh) {
+        if (createdRecipes.length >= count) continue;
+
+        const minDist = bridgeMinDistinctIngredients ?? 5;
+        if (matchedIngredients.length < minDist) continue;
+
+        if (hubNameSet.size >= 2) {
+          const hubMatchCount = matchedIngredients.filter((m) =>
+            hubNameSet.has(pantryIdToName.get(m.ingredientId) ?? ""),
+          ).length;
+          if (hubMatchCount < 3) continue;
+        }
+
+        const categories = new Set(
+          matchedIngredients.map(
+            (m) => pantryCategoryById.get(m.ingredientId) ?? "",
+          ),
+        );
+        categories.delete("");
+        if (categories.size < 3) continue;
+
+        try {
+          const created = await prisma.recipe.create({
+            data: {
+              title: recipe.title,
+              description: recipe.description,
+              cuisine: cuisineEnum,
+              difficulty: recipe.difficulty,
+              techniques,
+              instructions: recipe.instructions as object[],
+              prepTime: recipe.prepTime,
+              cookTime: recipe.cookTime,
+              servings: recipe.servings,
+              flavorTags: recipe.flavorTags,
+              tags: recipe.tags,
+              source,
+              generationJobId: jobId,
+              pantrySnapshotAtGen: pantrySnapshot,
+              ingredients: { create: matchedIngredients },
+            },
+            include: {
+              ingredients: { include: { ingredient: true } },
+            },
+          });
+          createdRecipes.push(created);
+        } catch {
+          // Individual mesh recipe failed — continue with the rest
+        }
+        continue;
+      }
 
       try {
         const created = await prisma.recipe.create({

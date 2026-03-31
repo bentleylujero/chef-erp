@@ -254,7 +254,7 @@ export function PastePantryDialog({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to add items");
     } finally {
-      void invalidateQueriesAffectedByPantry(queryClient);
+      await invalidateQueriesAffectedByPantry(queryClient);
     }
   }, [rows, bulkMutation, onOpenChange, queryClient]);
 

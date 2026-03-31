@@ -1,5 +1,5 @@
 import Fuse from "fuse.js";
-import { openai } from "@/lib/openai";
+import { openai, OPENAI_MODEL_VISION } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 
 export interface ParsedReceiptItem {
@@ -33,32 +33,15 @@ interface VisionResponse {
   items: VisionItem[];
 }
 
-const VISION_PROMPT = `You are a receipt OCR specialist. Analyze this grocery receipt image and extract all line items as structured JSON.
+const VISION_PROMPT = `ROLE: Receipt OCR → JSON only. No prose outside the JSON object.
 
-Return ONLY valid JSON in this exact format:
-{
-  "storeName": "Store Name or null",
-  "receiptDate": "YYYY-MM-DD or null",
-  "totalAmount": 0.00,
-  "items": [
-    {
-      "name": "item name as written on receipt",
-      "quantity": 1,
-      "unitPrice": 0.00,
-      "totalPrice": 0.00
-    }
-  ]
-}
+Extract grocery line items from the image into this shape:
+{"storeName":string|null,"receiptDate":"YYYY-MM-DD"|null,"totalAmount":number|null,"items":[{"name":string,"quantity":number,"unitPrice":number,"totalPrice":number}]}
 
-Rules:
-- Extract every line item, even if partially readable
-- Normalize item names: expand abbreviations (e.g. "ORG" → "Organic", "BNL SKNL" → "Boneless Skinless")
-- If quantity is not explicitly listed, default to 1
-- unitPrice = totalPrice / quantity
-- If only one price is visible, use it for both unitPrice and totalPrice
-- Exclude tax lines, subtotals, discounts, and payment method lines
-- For produce sold by weight, use the weight as quantity and set unit price accordingly
-- Return null for storeName/receiptDate if not visible`;
+Rules (be brief in string values; expand obvious abbreviations e.g. ORG→Organic):
+- Every product line; skip tax, subtotal, payment, discounts
+- quantity defaults 1 if missing; unitPrice = totalPrice/quantity when both known else mirror single price
+- null store/date/total when illegible`;
 
 function classifyConfidence(score: number | undefined): ParsedReceiptItem["confidence"] {
   if (score === undefined) return "unmatched";
@@ -88,18 +71,18 @@ export async function parseReceiptImage(imageBase64: string): Promise<ParsedRece
     : `data:${mediaType};base64,${imageBase64}`;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: OPENAI_MODEL_VISION,
     messages: [
       {
         role: "user",
         content: [
           { type: "text", text: VISION_PROMPT },
-          { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
         ],
       },
     ],
     response_format: { type: "json_object" },
-    max_tokens: 4096,
+    max_tokens: 2500,
     temperature: 0.1,
   });
 

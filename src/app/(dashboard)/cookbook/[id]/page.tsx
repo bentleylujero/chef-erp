@@ -187,7 +187,7 @@ export default function RecipeDetailPage({
   }>;
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6">
       {/* Navigation */}
       <Link
         href="/cookbook"
@@ -280,10 +280,10 @@ export default function RecipeDetailPage({
         </div>
       </div>
 
-      {/* Two-column layout */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+      {/* Two-column layout — minmax(0,…) + min-w-0 prevents grid track collapse */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         {/* Ingredients */}
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="border-b pb-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4" />
@@ -353,7 +353,7 @@ export default function RecipeDetailPage({
         </Card>
 
         {/* Instructions */}
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="border-b pb-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <UtensilsCrossed className="size-4" />
@@ -363,36 +363,48 @@ export default function RecipeDetailPage({
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-3">
-            <ol className="space-y-4">
+          <CardContent className="min-w-0 pt-3">
+            <ol className="list-none space-y-5 pl-0">
               {instructions.map((inst, i) => (
-                <li key={inst.step ?? i} className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                <li
+                  key={`step-${inst.step ?? i}-${i}`}
+                  className="flex min-w-0 gap-3"
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                     {inst.step ?? i + 1}
                   </span>
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <p className="text-sm leading-relaxed">{inst.text}</p>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {inst.technique && (
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1.5 text-[10px] font-normal"
-                        >
-                          {formatTechnique(inst.technique)}
-                        </Badge>
-                      )}
-                      {inst.timing && (
-                        <Badge
-                          variant="secondary"
-                          className="h-4 px-1.5 text-[10px]"
-                        >
-                          <Clock className="mr-0.5 size-2.5" />
-                          {inst.timing}
-                        </Badge>
-                      )}
-                    </div>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="text-base leading-relaxed break-words text-foreground">
+                      {inst.text}
+                    </p>
+                    {(inst.technique || inst.timing) && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {inst.technique && (
+                          <Link
+                            href={`/profile/techniques?focus=${encodeURIComponent(inst.technique)}`}
+                            className="inline-flex"
+                          >
+                            <Badge
+                              variant="outline"
+                              className="h-auto max-w-full whitespace-normal py-1 text-xs font-normal hover:bg-muted"
+                            >
+                              {formatTechnique(inst.technique)}
+                            </Badge>
+                          </Link>
+                        )}
+                        {inst.timing && (
+                          <Badge
+                            variant="secondary"
+                            className="h-auto max-w-full whitespace-normal py-1 text-xs"
+                          >
+                            <Clock className="mr-1 size-3 shrink-0" />
+                            {inst.timing}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     {inst.notes && (
-                      <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+                      <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-sm leading-relaxed text-muted-foreground break-words">
                         {inst.notes}
                       </p>
                     )}
@@ -439,17 +451,45 @@ export default function RecipeDetailPage({
         </Button>
       </div>
 
-      {/* Techniques */}
+      {/* Techniques — logged when you finish "Cook This" → Log & finish */}
       {recipe.techniques.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-medium text-muted-foreground">
-            Techniques Used
-          </h3>
-          <div className="flex flex-wrap gap-1.5">
+        <div className="rounded-xl border bg-muted/20 px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-medium text-foreground">
+              Techniques used
+            </h3>
+            <Link
+              href="/profile/techniques"
+              className="text-xs text-primary underline-offset-4 hover:underline"
+            >
+              View mastery tracker
+            </Link>
+          </div>
+          <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+            Completing <strong className="font-medium text-foreground">Cook This</strong>{" "}
+            and saving your cook logs each technique once per session on your{" "}
+            <Link
+              href="/profile/techniques"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Techniques
+            </Link>{" "}
+            page (times practiced and last cooked).
+          </p>
+          <div className="flex flex-wrap gap-2">
             {recipe.techniques.map((t) => (
-              <Badge key={t} variant="outline">
-                {formatTechnique(t)}
-              </Badge>
+              <Link
+                key={t}
+                href={`/profile/techniques?focus=${encodeURIComponent(t)}`}
+                className="inline-flex"
+              >
+                <Badge
+                  variant="outline"
+                  className="cursor-pointer py-1 text-xs hover:bg-muted"
+                >
+                  {formatTechnique(t)}
+                </Badge>
+              </Link>
             ))}
           </div>
         </div>

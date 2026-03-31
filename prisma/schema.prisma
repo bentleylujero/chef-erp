@@ -133,6 +133,8 @@ enum RecipeSource {
   AI_EXPIRY_RESCUE
   AI_PREFERENCE_DRIFT
   AI_INGREDIENT_FILL
+  AI_PANTRY_BRIDGE
+  AI_NETWORK_MESH
   USER_CREATED
   IMPORTED
 }
@@ -140,6 +142,8 @@ enum RecipeSource {
 enum GenerationTrigger {
   ONBOARDING_BATCH
   NEW_INGREDIENTS
+  PANTRY_BRIDGE
+  NETWORK_MESH
   CUISINE_EXPLORATION
   PREFERENCE_DRIFT
   EXPIRY_RESCUE
@@ -245,9 +249,10 @@ model User {
   groceryLists       GroceryList[]
   mealPlans          MealPlan[]
   preferenceSignals  PreferenceSignal[]
-  generationJobs     GenerationJob[]
-  cuisineExplorations CuisineExploration[]
-  techniqueLogs      TechniqueLog[]
+  generationJobs          GenerationJob[]
+  cuisineExplorations   CuisineExploration[]
+  techniqueLogs         TechniqueLog[]
+  pantryBridgeAttempts  PantryBridgeAttempt[]
 
   @@index([email])
 }
@@ -432,6 +437,21 @@ model GenerationJob {
   @@index([userId])
   @@index([status])
   @@index([trigger])
+}
+
+/// One row per (user, ingredient pair) we have already sent to AI for pantry-bridge recipes — never repeat the same pair.
+model PantryBridgeAttempt {
+  id              String   @id @default(cuid())
+  userId          String
+  ingredientAId   String
+  ingredientBId   String
+  generationJobId String?
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ingredientAId, ingredientBId])
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────
