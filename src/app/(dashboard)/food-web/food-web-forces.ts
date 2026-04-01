@@ -13,7 +13,38 @@ export interface PhysicsOverrides {
   linkDistanceMultiplier?: number;
   collisionPadding?: number;
   radialStrength?: number;
+  linkStrength?: number;
+  clusterStrength?: number;
 }
+
+/** Quick-apply presets for common layouts. */
+export const PHYSICS_PRESETS = {
+  tight: {
+    chargeStrength: -150,
+    linkDistanceMultiplier: 0.6,
+    collisionPadding: 10,
+    radialStrength: 0.08,
+    linkStrength: 0.25,
+    clusterStrength: 0.28,
+  },
+  balanced: {} as PhysicsOverrides, // defaults
+  spread: {
+    chargeStrength: -600,
+    linkDistanceMultiplier: 2.0,
+    collisionPadding: 35,
+    radialStrength: 0.01,
+    linkStrength: 0.1,
+    clusterStrength: 0.1,
+  },
+  organic: {
+    chargeStrength: -300,
+    linkDistanceMultiplier: 1.5,
+    collisionPadding: 20,
+    radialStrength: 0.005,
+    linkStrength: 0.08,
+    clusterStrength: 0.05,
+  },
+} as const satisfies Record<string, PhysicsOverrides>;
 
 /**
  * Apply all custom d3 forces to the ForceGraph2D instance.
@@ -65,7 +96,7 @@ export function configureForces(
       return Math.min(300, Math.max(80, 80 + wgt * 15)) * distMul;
     });
   }
-  link?.strength(0.15);
+  link?.strength(overrides?.linkStrength ?? 0.15);
 
   // ── Radial force — hubs toward center ──
   const radialStr = overrides?.radialStrength ?? 0.02;
@@ -95,6 +126,8 @@ export function configureForces(
   );
 
   // ── Category / cuisine clustering — STRONG micro-city formation ──
+  const clusterStr = overrides?.clusterStrength ?? 0.18;
+
   if (graphMode === "cuisine-clusters") {
     const cuisines = [...new Set(nodes.map((n) => n.cuisineTags?.[0] ?? "OTHER"))];
     const angleStep = (2 * Math.PI) / Math.max(1, cuisines.length);
@@ -107,7 +140,7 @@ export function configureForces(
         const cuisine = n.cuisineTags?.[0] ?? "OTHER";
         const angle = cuisineAngle.get(cuisine) ?? 0;
         return cx + Math.cos(angle) * clusterR;
-      }).strength(0.18),
+      }).strength(clusterStr),
     );
     fg.d3Force(
       "clusterY",
@@ -115,7 +148,7 @@ export function configureForces(
         const cuisine = n.cuisineTags?.[0] ?? "OTHER";
         const angle = cuisineAngle.get(cuisine) ?? 0;
         return cy + Math.sin(angle) * clusterR;
-      }).strength(0.18),
+      }).strength(clusterStr),
     );
   } else {
     // Strong category clustering — forms distinct micro-cities
@@ -123,21 +156,20 @@ export function configureForces(
     const angleStep = (2 * Math.PI) / Math.max(1, categories.length);
     const categoryAngle = new Map(categories.map((c, i) => [c, i * angleStep]));
     const clusterR = Math.min(width, height) * 0.28;
-    const clusterStrength = 0.18;
 
     fg.d3Force(
       "clusterX",
       forceX((n: GraphNode) => {
         const angle = categoryAngle.get(n.category) ?? 0;
         return cx + Math.cos(angle) * clusterR;
-      }).strength(clusterStrength),
+      }).strength(clusterStr),
     );
     fg.d3Force(
       "clusterY",
       forceY((n: GraphNode) => {
         const angle = categoryAngle.get(n.category) ?? 0;
         return cy + Math.sin(angle) * clusterR;
-      }).strength(clusterStrength),
+      }).strength(clusterStr),
     );
   }
 }

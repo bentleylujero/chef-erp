@@ -75,7 +75,7 @@ const DISPLAY_CANVAS = display.style.fontFamily;
 export default function FoodWebClient() {
   // ── State ────────────────────────────────────────────
   const [cuisine, setCuisine] = useState<string | undefined>();
-  const [pantryOnly, setPantryOnly] = useState(false);
+  const [pantryOnly, setPantryOnly] = useState(true);
   const [minWeight, setMinWeight] = useState(1);
   const [graphMode, setGraphMode] = useState<GraphMode>("co-occurrence");
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
@@ -85,6 +85,7 @@ export default function FoodWebClient() {
   const [highlightedCategory, setHighlightedCategory] = useState<string | null>(null);
   const [physicsOverrides, setPhysicsOverrides] = useState<PhysicsOverrides>({});
   const [velocityDecay, setVelocityDecay] = useState(0.35);
+  const [alphaDecay, setAlphaDecay] = useState(0.0228);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [hoveredLink, setHoveredLink] = useState<any>(null);
 
@@ -111,15 +112,19 @@ export default function FoodWebClient() {
   const { data: meshStatus, isLoading: meshLoading } = useNetworkMesh();
   const meshGen = useNetworkMeshGenerate();
 
-  // ── Animation loop — continuously repaint for particle transfer animations ──
+  // ── Throttled animation — repaint at ~20fps for particle animations ──
   useEffect(() => {
     let raf: number;
+    let lastTick = 0;
+    const FRAME_INTERVAL = 50; // 20fps is plenty for subtle particles
     function tick(ts: number) {
       animTimeRef.current = ts;
-      // Force canvas repaint every frame so transfer particles animate smoothly
-      const fg = graphRef.current;
-      if (fg && typeof fg.tickFrame === "function") {
-        fg.tickFrame();
+      if (ts - lastTick >= FRAME_INTERVAL) {
+        lastTick = ts;
+        const fg = graphRef.current;
+        if (fg && typeof fg.tickFrame === "function") {
+          fg.tickFrame();
+        }
       }
       raf = requestAnimationFrame(tick);
     }
@@ -247,6 +252,8 @@ export default function FoodWebClient() {
   }, [graphData.nodes]);
 
   // ── Discover mode: ghost edges for unexplored high-affinity pairs ──
+  // Optimized: only compare pantry items (more relevant), pre-filter nodes
+  // with flavor tags, and use early termination.
   const discoveryLinks = useMemo(() => {
     if (!discoverMode || !graphData.nodes.length) return [];
     const existingPairs = new Set<string>();
@@ -256,26 +263,26 @@ export default function FoodWebClient() {
       existingPairs.add(a < b ? `${a}::${b}` : `${b}::${a}`);
     }
 
+    // Pre-filter: only nodes with flavor tags, prioritize pantry items
+    const candidates = graphData.nodes.filter(
+      (n) => n.flavorTags && Object.keys(n.flavorTags).length > 0,
+    );
+    // Sort pantry items first so the best discoveries bubble up
+    candidates.sort((a, b) => (b.inPantry ? 1 : 0) - (a.inPantry ? 1 : 0));
+    // Cap candidates to avoid O(n²) blowup on large graphs
+    const maxCandidates = Math.min(candidates.length, 80);
+
     const ghosts: { source: GraphNode; target: GraphNode; affinity: number }[] = [];
-    const nodes = graphData.nodes;
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i];
-        const b = nodes[j];
+    for (let i = 0; i < maxCandidates; i++) {
+      for (let j = i + 1; j < maxCandidates; j++) {
+        const a = candidates[i];
+        const b = candidates[j];
         const pk = a.id < b.id ? `${a.id}::${b.id}` : `${b.id}::${a.id}`;
         if (existingPairs.has(pk)) continue;
 
+        // Inline cosine similarity
         const aFlavor = a.flavorTags;
         const bFlavor = b.flavorTags;
-        if (
-          !aFlavor ||
-          !bFlavor ||
-          Object.keys(aFlavor).length === 0 ||
-          Object.keys(bFlavor).length === 0
-        )
-          continue;
-
-        // Inline cosine similarity
         const keys = new Set([
           ...Object.keys(aFlavor),
           ...Object.keys(bFlavor),
@@ -361,22 +368,27 @@ export default function FoodWebClient() {
     return () => clearTimeout(timer);
   }, [graphData.nodes.length, fitPadding]);
 
-  const handleEngineStop = useCallback(() => {
+  // Second fit after simulation settles — timer-based since engine never stops
+  const settledFitRef = useRef(false);
+  useEffect(() => {
+    if (!graphData.nodes.length || settledFitRef.current) return;
     const fg = graphRef.current;
-    if (!fg || graphData.nodes.length === 0) return;
-    entryStartRef.current = animTimeRef.current;
-    // Second fit after simulation settles for final positions
-    if (!userInteractedRef.current) {
-      requestAnimationFrame(() => {
+    if (!fg) return;
+    const timer = setTimeout(() => {
+      settledFitRef.current = true;
+      entryStartRef.current = animTimeRef.current;
+      if (!userInteractedRef.current) {
         fg.zoomToFit(450, fitPadding);
-      });
-    }
-  }, [fitPadding, graphData.nodes.length]);
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [graphData.nodes.length, fitPadding]);
 
   // Reset interaction tracking when data changes (new filter, mode switch)
   useEffect(() => {
     userInteractedRef.current = false;
     initialFitDoneRef.current = false;
+    settledFitRef.current = false;
   }, [showUnlinked, graphMode, dataUpdatedAt]);
 
   // ── Canvas callbacks ─────────────────────────────────
@@ -453,7 +465,7 @@ export default function FoodWebClient() {
         const ty = ghost.target.y ?? 0;
 
         const alpha = 0.08 + ghost.affinity * 0.12;
-        const hue = ghost.affinity > 0.8 ? HUD.green : HUD.amber;
+        const hue = ghost.affinity > 0.8 ? HUD.green : HUD.accent;
 
         ctx.beginPath();
         ctx.setLineDash([3, 6]);
@@ -557,43 +569,21 @@ export default function FoodWebClient() {
           FULL-BLEED GRAPH CONTAINER
           ═══════════════════════════════════════════════ */}
       <div ref={containerRef} className="relative min-h-0 flex-1">
-        {/* BG: Obsidian-inspired dot noise */}
+        {/* BG: Warm dark canvas */}
         <div className="absolute inset-0" style={{ backgroundColor: WEB.canvasBg }} />
+        {/* Subtle dot grid — cartographic feel */}
         <div
           className="pointer-events-none absolute inset-0"
           style={{
-            backgroundImage: `radial-gradient(circle, ${WEB.dotNoise} 1px, transparent 1px)`,
-            backgroundSize: "24px 24px",
+            backgroundImage: `radial-gradient(circle, ${WEB.dotNoise} 0.8px, transparent 0.8px)`,
+            backgroundSize: "28px 28px",
           }}
         />
-        {/* Vignette — subtle so the graph doesn't feel boxed in */}
+        {/* Gentle warm vignette */}
         <div
           className="pointer-events-none absolute inset-0"
           style={{
-            background: `radial-gradient(ellipse at center, transparent 0%, ${hexToRgba(WEB.canvasBg, 0.08)} 60%, ${hexToRgba("#111114", 0.4)} 100%)`,
-          }}
-        />
-
-        {/* Persistent ambient animations */}
-        {/* Slow rotating scan line */}
-        <div
-          className="pointer-events-none absolute inset-0 animate-[spin_20s_linear_infinite] opacity-[0.03]"
-          style={{
-            background: `conic-gradient(from 0deg at 50% 50%, transparent 0deg, ${HUD.cyan} 2deg, transparent 4deg)`,
-          }}
-        />
-        {/* Pulsing radial glow */}
-        <div
-          className="pointer-events-none absolute inset-0 animate-[pulse_6s_ease-in-out_infinite]"
-          style={{
-            background: `radial-gradient(circle at 50% 50%, ${hexToRgba(HUD.cyan, 0.03)} 0%, transparent 50%)`,
-          }}
-        />
-        {/* Drifting secondary glow */}
-        <div
-          className="pointer-events-none absolute inset-0 animate-[drift_12s_ease-in-out_infinite]"
-          style={{
-            background: `radial-gradient(ellipse at 30% 70%, ${hexToRgba("#a855f7", 0.025)} 0%, transparent 40%), radial-gradient(ellipse at 70% 30%, ${hexToRgba(HUD.cyan, 0.02)} 0%, transparent 40%)`,
+            background: `radial-gradient(ellipse at center, transparent 0%, ${hexToRgba(WEB.canvasBg, 0.06)} 55%, ${hexToRgba("#0f0e12", 0.5)} 100%)`,
           }}
         />
 
@@ -606,7 +596,7 @@ export default function FoodWebClient() {
                   className="absolute inset-0 animate-spin rounded-full border"
                   style={{
                     borderColor: HUD.border,
-                    borderTopColor: hexToRgba(HUD.cyan, 0.4),
+                    borderTopColor: hexToRgba(HUD.accent, 0.4),
                     animationDuration: "3s",
                   }}
                 />
@@ -614,7 +604,7 @@ export default function FoodWebClient() {
                   className="absolute inset-3 animate-spin rounded-full border"
                   style={{
                     borderColor: HUD.border,
-                    borderTopColor: hexToRgba(HUD.cyan, 0.2),
+                    borderTopColor: hexToRgba(HUD.accent, 0.2),
                     animationDuration: "5s",
                     animationDirection: "reverse",
                   }}
@@ -623,14 +613,14 @@ export default function FoodWebClient() {
                   className="absolute inset-6 animate-spin rounded-full border"
                   style={{
                     borderColor: HUD.border,
-                    borderTopColor: hexToRgba(HUD.cyan, 0.1),
+                    borderTopColor: hexToRgba(HUD.accent, 0.1),
                     animationDuration: "7s",
                   }}
                 />
                 <div className="absolute inset-0 flex items-center justify-center">
                   <Network
                     className="h-6 w-6"
-                    style={{ color: hexToRgba(HUD.cyan, 0.3) }}
+                    style={{ color: hexToRgba(HUD.accent, 0.3) }}
                   />
                 </div>
               </div>
@@ -682,16 +672,16 @@ export default function FoodWebClient() {
             onNodeClick={handleNodeClick as never}
             onNodeDrag={handleNodeDrag as never}
             onNodeDragEnd={handleNodeDragEnd as never}
-            onEngineStop={handleEngineStop as never}
             onRenderFramePost={onRenderFramePost as never}
             onZoom={handleZoom as never}
             onBackgroundClick={handleBackgroundClick as never}
             onBackgroundRightClick={handleBackgroundRightClick as never}
             enableNodeDrag={true}
             warmupTicks={80}
-            cooldownTicks={200}
-            cooldownTime={4000}
+            cooldownTicks={Infinity}
+            cooldownTime={Infinity}
             d3VelocityDecay={velocityDecay}
+            d3AlphaDecay={alphaDecay}
             enableZoomInteraction={true}
             enablePanInteraction={true}
             minZoom={0.1}
@@ -764,6 +754,8 @@ export default function FoodWebClient() {
             setOverrides={setPhysicsOverrides}
             velocityDecay={velocityDecay}
             setVelocityDecay={setVelocityDecay}
+            alphaDecay={alphaDecay}
+            setAlphaDecay={setAlphaDecay}
             nodeCount={graphData.nodes.length}
             graphRef={graphRef}
             monoClass={MONO}
@@ -787,7 +779,7 @@ export default function FoodWebClient() {
           >
             <span
               className={cn(MONO, "text-[8px] uppercase tracking-wider")}
-              style={{ color: hexToRgba(HUD.green, 0.6) }}
+              style={{ color: hexToRgba(HUD.accent, 0.6) }}
             >
               {discoveryLinks.length} unexplored flavor match
               {discoveryLinks.length === 1 ? "" : "es"}
