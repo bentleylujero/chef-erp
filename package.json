@@ -9,6 +9,7 @@
     "dev:alt": "next dev -p 3001",
     "dev:127": "next dev -H 127.0.0.1 -p 3000",
     "dev:webpack": "next dev -p 3000 --webpack",
+    "postinstall": "prisma generate",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
