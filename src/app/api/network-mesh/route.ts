@@ -1,10 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkNetworkMeshGeneration } from "@/lib/engines/generation-trigger";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export const dynamic = "force-dynamic";
-
-const DEMO_USER_ID = "demo-user";
 const MESH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 export interface NetworkMeshStatus {
@@ -25,11 +24,15 @@ function appOrigin(): string {
 
 export async function GET() {
   try {
-    const decision = await checkNetworkMeshGeneration(DEMO_USER_ID);
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
+    const decision = await checkNetworkMeshGeneration(userId);
 
     const recentMesh = await prisma.generationJob.findFirst({
       where: {
-        userId: DEMO_USER_ID,
+        userId,
         trigger: "NETWORK_MESH",
         status: "COMPLETED",
       },
@@ -64,9 +67,13 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    const decision = await checkNetworkMeshGeneration(DEMO_USER_ID);
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
+    const decision = await checkNetworkMeshGeneration(userId);
     if (!decision.shouldGenerate) {
       return NextResponse.json(
         { error: decision.reason },
@@ -76,9 +83,11 @@ export async function POST() {
 
     const res = await fetch(`${appOrigin()}/api/ai/generate-batch`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: request.headers.get("cookie") ?? "",
+      },
       body: JSON.stringify({
-        userId: DEMO_USER_ID,
         trigger: decision.trigger,
         count: decision.count,
       }),

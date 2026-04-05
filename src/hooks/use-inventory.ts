@@ -63,6 +63,9 @@ export interface Ingredient {
   storageType: string;
   avgPricePerUnit: number | null;
   description: string | null;
+  catalogTier?: string;
+  matchedVia?: string;
+  resolveVia?: string;
 }
 
 export interface InventoryFilters {
@@ -218,11 +221,11 @@ export function useDeleteInventory() {
 
 export function useIngredientSearch(search: string) {
   return useQuery<Ingredient[]>({
-    queryKey: ["ingredients", search],
+    queryKey: ["ingredients", "suggest", search],
     queryFn: async () => {
       if (!search) return [];
-      const params = new URLSearchParams({ search });
-      const res = await fetch(`/api/ingredients?${params}`);
+      const params = new URLSearchParams({ q: search });
+      const res = await fetch(`/api/ingredients/suggest?${params}`);
       if (!res.ok) throw new Error("Failed to search ingredients");
       return res.json();
     },

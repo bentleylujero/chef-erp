@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { updateFlavorProfileFromSignals } from "@/lib/engines/preference-aggregator";
-
-const DEMO_USER_ID = "demo-user";
+import { curateCookbook } from "@/lib/engines/cookbook-curator";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 const preferenceSignalSchema = z.object({
   signalType: z.enum([
@@ -24,6 +24,10 @@ const preferenceSignalSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = preferenceSignalSchema.safeParse(body);
 
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     const signal = await prisma.preferenceSignal.create({
       data: {
-        userId: DEMO_USER_ID,
+        userId,
         signalType,
         entityType,
         entityId,
@@ -47,7 +51,19 @@ export async function POST(request: NextRequest) {
     });
 
     if (signalType === "COOKED" || signalType === "RATED") {
-      await updateFlavorProfileFromSignals(DEMO_USER_ID);
+      await updateFlavorProfileFromSignals(userId);
+    }
+
+    // High-signal events may shift preferences enough to trigger cookbook curation
+    const HIGH_SIGNAL = new Set(["COOKED", "RATED", "FAVORITED"]);
+    if (HIGH_SIGNAL.has(signalType)) {
+      after(async () => {
+        try {
+          await curateCookbook(userId);
+        } catch {
+          // Fire-and-forget
+        }
+      });
     }
 
     return NextResponse.json(signal, { status: 201 });

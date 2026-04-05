@@ -3,18 +3,21 @@ import {
   HydrationBoundary,
   QueryClient,
 } from "@tanstack/react-query";
+import { redirect } from "next/navigation";
 import { buildTopologyData } from "@/lib/engines/topology-builder";
 import { foodWebQueryKey } from "@/lib/food-web-query-key";
+import { resolveUserId } from "@/lib/auth/user-service";
 import FoodWebClient from "./food-web-client";
 
-const DEMO_USER_ID = "demo-user";
-
 export default async function FoodWebPage() {
+  const userId = await resolveUserId();
+  if (!userId) redirect("/login");
+
   const queryClient = new QueryClient();
 
   await queryClient.prefetchQuery({
-    queryKey: [...foodWebQueryKey()],
-    queryFn: () => buildTopologyData(DEMO_USER_ID, { minWeight: 1 }),
+    queryKey: [...foodWebQueryKey({ pantryOnly: true, minWeight: 1 })],
+    queryFn: () => buildTopologyData(userId, { pantryOnly: true, minWeight: 1 }),
   });
 
   return (

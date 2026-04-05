@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { getApiUserId, requireApiUserId } from "@/lib/auth/api-user";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 
 export async function GET(
   _request: NextRequest,
@@ -8,9 +10,10 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const viewerId = await getApiUserId();
 
-    const recipe = await prisma.recipe.findUnique({
-      where: { id },
+    const recipe = await prisma.recipe.findFirst({
+      where: { id, AND: [recipeVisibilityClause(viewerId)] },
       include: {
         ingredients: {
           include: { ingredient: true },
@@ -106,6 +109,10 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id } = await params;
     const body = await request.json();
     const parsed = updateRecipeSchema.safeParse(body);
@@ -120,6 +127,12 @@ export async function PUT(
     const existing = await prisma.recipe.findUnique({ where: { id } });
     if (!existing) {
       return NextResponse.json({ error: "Recipe not found" }, { status: 404 });
+    }
+    if (
+      existing.ownerUserId !== null &&
+      existing.ownerUserId !== userId
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     if (existing.status === "archived") {
       return NextResponse.json(
@@ -171,11 +184,21 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id } = await params;
 
     const existing = await prisma.recipe.findUnique({ where: { id } });
     if (!existing) {
       return NextResponse.json({ error: "Recipe not found" }, { status: 404 });
+    }
+    if (
+      existing.ownerUserId !== null &&
+      existing.ownerUserId !== userId
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     await prisma.recipe.update({

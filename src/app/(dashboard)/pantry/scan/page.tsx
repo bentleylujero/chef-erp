@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Camera,
   Upload,
@@ -479,7 +480,21 @@ function ReviewStep({
   );
 }
 
-function SuccessStep({ result }: { result: ConfirmReceiptResult }) {
+function safeOnboardingReturnHref(raw: string | null): string | null {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+  const path = raw.split("?")[0];
+  if (path !== "/onboarding") return null;
+  return raw;
+}
+
+function SuccessStep({
+  result,
+  returnTo,
+}: {
+  result: ConfirmReceiptResult;
+  returnTo: string | null;
+}) {
+  const continueHref = safeOnboardingReturnHref(returnTo);
   return (
     <div className="mx-auto max-w-md space-y-8 text-center">
       <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-emerald-500/10">
@@ -537,7 +552,16 @@ function SuccessStep({ result }: { result: ConfirmReceiptResult }) {
         </Card>
       )}
 
-      <div className="flex gap-3 justify-center">
+      <div className="flex flex-wrap gap-3 justify-center">
+        {continueHref ? (
+          <Link
+            href={continueHref}
+            className={buttonVariants({ variant: "default", size: "lg" })}
+          >
+            <ArrowRight className="size-4" />
+            Continue setup
+          </Link>
+        ) : null}
         <Link
           href="/pantry"
           className={buttonVariants({ variant: "outline", size: "lg" })}
@@ -546,8 +570,15 @@ function SuccessStep({ result }: { result: ConfirmReceiptResult }) {
           View Pantry
         </Link>
         <Link
-          href="/pantry/scan"
-          className={buttonVariants({ variant: "default", size: "lg" })}
+          href={
+            continueHref
+              ? `/pantry/scan?returnTo=${encodeURIComponent(continueHref)}`
+              : "/pantry/scan"
+          }
+          className={buttonVariants({
+            variant: continueHref ? "outline" : "default",
+            size: "lg",
+          })}
         >
           <RotateCcw className="size-4" />
           Scan Another
@@ -557,7 +588,10 @@ function SuccessStep({ result }: { result: ConfirmReceiptResult }) {
   );
 }
 
-export default function ScanReceiptPage() {
+function ScanReceiptPageInner() {
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get("returnTo");
+
   const [step, setStep] = useState<ScanStep>("upload");
   const [imageBase64, setImageBase64] = useState<string>("");
   const [preview, setPreview] = useState<string>("");
@@ -744,7 +778,23 @@ export default function ScanReceiptPage() {
           confirming={confirmMutation.isPending}
         />
       )}
-      {step === "success" && confirmResult && <SuccessStep result={confirmResult} />}
+      {step === "success" && confirmResult && (
+        <SuccessStep result={confirmResult} returnTo={returnTo} />
+      )}
     </div>
+  );
+}
+
+export default function ScanReceiptPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="text-muted-foreground p-8 text-center text-sm">
+          Loading…
+        </div>
+      }
+    >
+      <ScanReceiptPageInner />
+    </Suspense>
   );
 }

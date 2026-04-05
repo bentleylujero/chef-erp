@@ -1,19 +1,22 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { addDays } from "date-fns";
-import { scheduleNewIngredientRecipeGeneration } from "@/lib/engines/schedule-new-ingredient-recipes";
-
-const DEMO_USER_ID = "demo-user";
+import { curateCookbook } from "@/lib/engines/cookbook-curator";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export async function GET(request: NextRequest) {
+  const auth = await requireApiUserId();
+  if ("response" in auth) return auth.response;
+  const { userId } = auth;
+
   const { searchParams } = request.nextUrl;
   const search = searchParams.get("search");
   const category = searchParams.get("category");
   const location = searchParams.get("location");
   const expiring = searchParams.get("expiring");
 
-  const where: Record<string, unknown> = { userId: DEMO_USER_ID };
+  const where: Record<string, unknown> = { userId };
   const ingredientWhere: Record<string, unknown> = {};
 
   if (search) {
@@ -60,6 +63,10 @@ const createSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = createSchema.safeParse(body);
 
@@ -90,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     const item = await prisma.inventory.create({
       data: {
-        userId: DEMO_USER_ID,
+        userId,
         ingredientId: data.ingredientId,
         quantity: data.quantity,
         unit: data.unit,
@@ -103,7 +110,16 @@ export async function POST(request: NextRequest) {
       include: { ingredient: true },
     });
 
-    scheduleNewIngredientRecipeGeneration(DEMO_USER_ID, [data.ingredientId]);
+    // Background: curate cookbook with the new ingredient
+    after(async () => {
+      try {
+        await curateCookbook(userId, {
+          newIngredientIds: [data.ingredientId],
+        });
+      } catch {
+        // Fire-and-forget
+      }
+    });
 
     return NextResponse.json(item, { status: 201 });
   } catch {

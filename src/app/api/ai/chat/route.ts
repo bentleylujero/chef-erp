@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openai, OPENAI_MODEL_CHAT } from "@/lib/openai";
 import { buildSousChefSystemPrompt } from "@/lib/ai/chat-system-prompt";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, userId } = (await request.json()) as {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
+    const { messages } = (await request.json()) as {
       messages: Array<{ role: "user" | "assistant"; content: string }>;
-      userId: string;
     };
 
-    if (!userId || !messages?.length) {
+    if (!messages?.length) {
       return NextResponse.json(
-        { error: "userId and messages are required" },
+        { error: "messages are required" },
         { status: 400 },
       );
     }

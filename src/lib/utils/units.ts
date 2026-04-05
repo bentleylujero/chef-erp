@@ -151,9 +151,39 @@ function fromMl(ml: number, unit: UnitType): number {
   }
 }
 
-function parseUnitString(unit: string): UnitType | null {
+export function parseUnitString(unit: string): UnitType | null {
   const key = unit.trim().toLowerCase();
   return UNIT_ALIASES[key] ?? null;
+}
+
+export type QuantityDimension = "mass" | "volume" | "count";
+
+/** Convert a quantity to a comparable base (g, ml, or count) for pantry math. */
+export function quantityToBase(
+  quantity: number,
+  unit: string,
+): { dimension: QuantityDimension; value: number } | null {
+  const u = parseUnitString(unit);
+  if (!u) return null;
+  if (MASS_UNITS.has(u)) return { dimension: "mass", value: toGrams(quantity, u) };
+  if (VOLUME_UNITS.has(u))
+    return { dimension: "volume", value: toMl(quantity, u) };
+  if (COUNT_UNITS.has(u)) return { dimension: "count", value: quantity };
+  return null;
+}
+
+/** Convert a base value back into a target unit (same dimension as when toBase was used). */
+export function quantityFromBase(
+  baseValue: number,
+  dimension: QuantityDimension,
+  unit: string,
+): number | null {
+  const u = parseUnitString(unit);
+  if (!u) return null;
+  if (dimension === "mass" && MASS_UNITS.has(u)) return fromGrams(baseValue, u);
+  if (dimension === "volume" && VOLUME_UNITS.has(u)) return fromMl(baseValue, u);
+  if (dimension === "count" && COUNT_UNITS.has(u)) return baseValue;
+  return null;
 }
 
 export function convertUnit(

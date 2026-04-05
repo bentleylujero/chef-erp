@@ -70,8 +70,6 @@ export const useChatStore = create<ChatStore>((set) => ({
   clearMessages: () => set({ messages: [], isStreaming: false }),
 }));
 
-const TEMP_USER_ID = "user_demo";
-
 export function useSousChef() {
   const {
     messages,
@@ -101,7 +99,8 @@ export function useSousChef() {
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, userId: TEMP_USER_ID }),
+        credentials: "include",
+        body: JSON.stringify({ messages: history }),
       });
 
       if (!response.ok) {

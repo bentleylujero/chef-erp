@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 import {
   getPantryNetworkHubIngredientNames,
   getUnlinkedPantryIngredients,
@@ -7,6 +8,7 @@ import {
   pickBridgePairsForGeneration,
   rankPantryBridgePairs,
 } from "@/lib/engines/pantry-bridge-heuristics";
+import { updateFlavorProfileFromSignals } from "@/lib/engines/preference-aggregator";
 
 export interface GenerationDecision {
   shouldGenerate: boolean;
@@ -55,11 +57,12 @@ export async function checkOnboardingGeneration(
 
   const cuisineCount = user.cookingStyle?.primaryCuisines.length ?? 0;
 
-  let count = 15;
-  if (pantrySize > 30) count += 2;
-  if (pantrySize > 50) count += 1;
-  if (cuisineCount > 2) count += 2;
-  count = Math.min(count, 20);
+  // Onboarding batch is the first taste — the full cookbook build follows via /api/cookbook/build
+  let count = 20;
+  if (pantrySize > 30) count += 3;
+  if (pantrySize > 50) count += 2;
+  if (cuisineCount > 2) count += 3;
+  count = Math.min(count, 25);
 
   return {
     shouldGenerate: true,
@@ -71,18 +74,20 @@ export async function checkOnboardingGeneration(
 }
 
 export async function checkNewIngredientGeneration(
-  _userId: string,
+  userId: string,
   newIngredientIds: string[],
 ): Promise<GenerationDecision> {
-  void _userId;
   if (newIngredientIds.length === 0)
     return NO_OP("NEW_INGREDIENTS", "No new ingredient IDs provided");
 
-  // Any active recipe in the catalog counts as coverage (shared cookbook, not only AI jobs).
+  // Coverage = visible cookbook (system templates + this user's recipes).
   const recipesUsingNew = await prisma.recipeIngredient.findMany({
     where: {
       ingredientId: { in: newIngredientIds },
-      recipe: { status: "active" },
+      recipe: {
+        status: "active",
+        AND: [recipeVisibilityClause(userId)],
+      },
     },
     select: { ingredientId: true },
   });
@@ -282,5 +287,195 @@ export async function checkNetworkMeshGeneration(
       pantrySize,
     },
     reason: `Network mesh: ${count} recipe(s) max to weave graph hubs through pantry`,
+  };
+}
+
+// ── COOKBOOK BUILD ─────────────────────────────────────────────────
+
+/**
+ * Checks if user qualifies for a full cookbook build.
+ * Requires: onboarding complete, pantry with 10+ items, cuisines set,
+ * and no previous COOKBOOK_BUILD completion.
+ */
+export async function checkCookbookBuildGeneration(
+  userId: string,
+): Promise<GenerationDecision> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      cookingStyle: { select: { primaryCuisines: true, exploringCuisines: true } },
+      inventory: { where: { quantity: { gt: 0 } }, select: { id: true } },
+      generationJobs: {
+        where: { trigger: "COOKBOOK_BUILD", status: "COMPLETED" },
+        select: { id: true, recipesGenerated: true },
+        take: 1,
+      },
+    },
+  });
+
+  if (!user) return NO_OP("COOKBOOK_BUILD", "User not found");
+  if (!user.onboardingComplete)
+    return NO_OP("COOKBOOK_BUILD", "Onboarding not complete");
+
+  const pantrySize = user.inventory.length;
+  if (pantrySize < 10)
+    return NO_OP("COOKBOOK_BUILD", "Need at least 10 pantry items for a full cookbook build");
+
+  const allCuisines = [
+    ...((user.cookingStyle?.primaryCuisines as string[]) ?? []),
+    ...((user.cookingStyle?.exploringCuisines as string[]) ?? []),
+  ];
+  if (allCuisines.length === 0)
+    return NO_OP("COOKBOOK_BUILD", "No cuisines selected — set preferences first");
+
+  // Scale recipe target by pantry size and cuisine count
+  // Base: 250 recipes, +30 per additional cuisine, +3 per pantry item over 20
+  const cuisineBonus = Math.max(0, allCuisines.length - 1) * 30;
+  const pantryBonus = Math.max(0, pantrySize - 20) * 3;
+  const targetCount = Math.min(500, 250 + cuisineBonus + pantryBonus);
+
+  // If a previous build exists, compute how many more are needed
+  if (user.generationJobs.length > 0) {
+    const prevGenerated = user.generationJobs[0].recipesGenerated;
+    const existing = await prisma.recipe.count({
+      where: {
+        ownerUserId: userId,
+        status: "active",
+        source: "AI_COOKBOOK_BUILD",
+      },
+    });
+
+    if (existing >= targetCount) {
+      return NO_OP(
+        "COOKBOOK_BUILD",
+        `Cookbook already has ${existing} build recipes (target: ${targetCount})`,
+      );
+    }
+
+    // Allow incremental builds if pantry/cuisines grew
+    const remaining = targetCount - existing;
+    return {
+      shouldGenerate: true,
+      trigger: "COOKBOOK_BUILD",
+      count: remaining,
+      context: {
+        pantrySize,
+        cuisineCount: allCuisines.length,
+        existingBuildRecipes: existing,
+        previousGenerated: prevGenerated,
+        targetCount,
+      },
+      reason: `Cookbook build: ${existing} of ${targetCount} recipes exist — generating ${remaining} more`,
+    };
+  }
+
+  return {
+    shouldGenerate: true,
+    trigger: "COOKBOOK_BUILD",
+    count: targetCount,
+    context: {
+      pantrySize,
+      cuisineCount: allCuisines.length,
+      targetCount,
+    },
+    reason: `Full cookbook build: ${targetCount} recipes across ${allCuisines.length} cuisine(s), pantry of ${pantrySize}`,
+  };
+}
+
+// ── PREFERENCE DRIFT ──────────────────────────────────────────────
+
+const DRIFT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DRIFT_THRESHOLD = 2.0;
+const DRIFT_MAX_RECIPES = 3;
+
+const PROFILE_TO_FLAVOR: Record<string, string> = {
+  spiceTolerance: "spicy",
+  sweetPref: "sweet",
+  saltyPref: "salty",
+  sourPref: "acidic",
+  umamiPref: "umami",
+  bitterPref: "bitter",
+};
+
+export async function checkPreferenceDriftGeneration(
+  userId: string,
+): Promise<GenerationDecision> {
+  // Cooldown check
+  const recentDrift = await prisma.generationJob.findFirst({
+    where: { userId, trigger: "PREFERENCE_DRIFT", status: "COMPLETED" },
+    orderBy: { completedAt: "desc" },
+    select: { completedAt: true },
+  });
+
+  if (
+    recentDrift?.completedAt &&
+    Date.now() - recentDrift.completedAt.getTime() < DRIFT_COOLDOWN_MS
+  ) {
+    return NO_OP("PREFERENCE_DRIFT", "Preference drift check ran within 24 hours");
+  }
+
+  // Update profile from latest signals
+  await updateFlavorProfileFromSignals(userId);
+
+  const profile = await prisma.flavorProfile.findUnique({ where: { userId } });
+  if (!profile) return NO_OP("PREFERENCE_DRIFT", "No flavor profile exists yet");
+
+  // Compute average flavor distribution of active cookbook recipes
+  const recipes = await prisma.recipe.findMany({
+    where: { status: "active", AND: [recipeVisibilityClause(userId)] },
+    select: { flavorTags: true },
+  });
+
+  if (recipes.length < 5) {
+    return NO_OP("PREFERENCE_DRIFT", "Too few recipes to detect drift");
+  }
+
+  const avgCookbook: Record<string, number> = {};
+  const flavorKeys = ["spicy", "sweet", "salty", "acidic", "umami", "bitter"];
+
+  for (const key of flavorKeys) {
+    let sum = 0;
+    let count = 0;
+    for (const r of recipes) {
+      const tags = r.flavorTags as Record<string, number> | null;
+      if (tags && typeof tags[key] === "number") {
+        sum += tags[key];
+        count++;
+      }
+    }
+    avgCookbook[key] = count > 0 ? sum / count : 5;
+  }
+
+  // Compare user profile vs cookbook average
+  const driftedDimensions: Array<{
+    dimension: string;
+    userValue: number;
+    cookbookAvg: number;
+    delta: number;
+  }> = [];
+
+  for (const [profileKey, flavorKey] of Object.entries(PROFILE_TO_FLAVOR)) {
+    const userValue = (profile as unknown as Record<string, number>)[profileKey] ?? 5;
+    const cookbookAvg = avgCookbook[flavorKey] ?? 5;
+    const delta = Math.abs(userValue - cookbookAvg);
+
+    if (delta >= DRIFT_THRESHOLD) {
+      driftedDimensions.push({ dimension: flavorKey, userValue, cookbookAvg, delta });
+    }
+  }
+
+  if (driftedDimensions.length === 0) {
+    return NO_OP("PREFERENCE_DRIFT", "Cookbook flavor profile aligns with user preferences");
+  }
+
+  return {
+    shouldGenerate: true,
+    trigger: "PREFERENCE_DRIFT",
+    count: DRIFT_MAX_RECIPES,
+    context: {
+      driftedDimensions,
+      recipeCount: recipes.length,
+    },
+    reason: `Preference drift detected in ${driftedDimensions.length} flavor dimension(s): ${driftedDimensions.map((d) => `${d.dimension} (user=${d.userValue}, cookbook=${d.cookbookAvg.toFixed(1)})`).join(", ")}`,
   };
 }

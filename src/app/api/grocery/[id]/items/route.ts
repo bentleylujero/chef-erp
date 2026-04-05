@@ -3,17 +3,16 @@ import { GroceryItemSource } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { categoryToStoreSection } from "@/lib/utils/categories";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 function estimateLineCost(quantity: number, pricePerUnit: number | null): number | null {
   if (pricePerUnit == null || pricePerUnit <= 0) return null;
   return Math.round(pricePerUnit * quantity * 100) / 100;
 }
 
-async function assertListOwner(listId: string) {
+async function assertListOwner(listId: string, userId: string) {
   const list = await prisma.groceryList.findFirst({
-    where: { id: listId, userId: DEMO_USER_ID },
+    where: { id: listId, userId },
     select: { id: true },
   });
   return list;
@@ -81,8 +80,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id: listId } = await params;
-    const owner = await assertListOwner(listId);
+    const owner = await assertListOwner(listId, userId);
     if (!owner) {
       return NextResponse.json({ error: "Grocery list not found" }, { status: 404 });
     }
@@ -160,8 +163,12 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id: listId } = await params;
-    const owner = await assertListOwner(listId);
+    const owner = await assertListOwner(listId, userId);
     if (!owner) {
       return NextResponse.json({ error: "Grocery list not found" }, { status: 404 });
     }
@@ -222,8 +229,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id: listId } = await params;
-    const owner = await assertListOwner(listId);
+    const owner = await assertListOwner(listId, userId);
     if (!owner) {
       return NextResponse.json({ error: "Grocery list not found" }, { status: 404 });
     }

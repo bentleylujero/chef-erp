@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id } = await params;
 
     const list = await prisma.groceryList.findFirst({
-      where: { id, userId: DEMO_USER_ID },
+      where: { id, userId },
       include: {
         items: {
           include: {
@@ -71,6 +74,10 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id } = await params;
     const body = await request.json();
     const parsed = updateListSchema.safeParse(body);
@@ -82,7 +89,7 @@ export async function PUT(
     }
 
     const existing = await prisma.groceryList.findFirst({
-      where: { id, userId: DEMO_USER_ID },
+      where: { id, userId },
     });
     if (!existing) {
       return NextResponse.json({ error: "Grocery list not found" }, { status: 404 });
@@ -138,10 +145,14 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const { id } = await params;
 
     const existing = await prisma.groceryList.findFirst({
-      where: { id, userId: DEMO_USER_ID },
+      where: { id, userId },
     });
     if (!existing) {
       return NextResponse.json({ error: "Grocery list not found" }, { status: 404 });

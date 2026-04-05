@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 import type { Cuisine, IngredientCategory } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -243,7 +244,10 @@ export async function buildTopologyData(
     mode?: string; // "co-occurrence" | "flavor-affinity" | "cuisine-clusters"
   },
 ): Promise<TopologyData> {
-  const recipeWhere: Record<string, unknown> = { status: "active" };
+  const recipeWhere: Record<string, unknown> = {
+    status: "active",
+    AND: [recipeVisibilityClause(userId)],
+  };
   if (filters?.cuisine) {
     recipeWhere.cuisine = filters.cuisine as Cuisine;
   }
@@ -651,7 +655,7 @@ export async function getPantryNetworkHubIngredientNames(
   limit: number,
 ): Promise<string[]> {
   const recipes = await prisma.recipe.findMany({
-    where: { status: "active" },
+    where: { status: "active", AND: [recipeVisibilityClause(userId)] },
     select: {
       ingredients: {
         select: { ingredient: { select: { id: true, name: true } } },
@@ -724,7 +728,7 @@ export async function getUnlinkedPantryIngredients(
   linkedPantryCount: number;
 }> {
   const recipes = await prisma.recipe.findMany({
-    where: { status: "active" },
+    where: { status: "active", AND: [recipeVisibilityClause(userId)] },
     select: {
       ingredients: {
         select: {

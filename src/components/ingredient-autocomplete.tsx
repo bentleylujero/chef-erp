@@ -257,11 +257,21 @@ export function IngredientAutocomplete({
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{ingredient.name}</div>
-                {ingredient.description && (
-                  <div className="text-muted-foreground truncate text-xs">
-                    {ingredient.description}
-                  </div>
-                )}
+                {(() => {
+                  const hint =
+                    ingredient.resolveVia &&
+                    ingredient.resolveVia !== "exact_name" &&
+                    ingredient.matchedVia
+                      ? ingredient.matchedVia
+                      : null;
+                  const desc = ingredient.description?.trim();
+                  const sub = [hint, desc].filter(Boolean).join(" · ");
+                  return sub ? (
+                    <div className="text-muted-foreground truncate text-xs">
+                      {sub}
+                    </div>
+                  ) : null;
+                })()}
               </div>
               <Badge
                 variant="secondary"

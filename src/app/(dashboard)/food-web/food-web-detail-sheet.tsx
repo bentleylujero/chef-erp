@@ -47,7 +47,7 @@ export default function FoodWebDetailSheet({
 
   const nodeColor = selectedNode
     ? (CATEGORY_COLORS[selectedNode.category] ?? CATEGORY_COLORS.OTHER)
-    : HUD.cyan;
+    : HUD.accent;
 
   const selectedConnections = useMemo(() => {
     if (!selectedNode || !data) return [];
@@ -190,8 +190,8 @@ export default function FoodWebDetailSheet({
       }}
     >
       <SheetContent
-        className="w-[380px] border-l-[#1a1a2e] sm:w-[420px]"
-        style={{ backgroundColor: "#0b0b12" }}
+        className="w-[380px] border-l-[#2a2420] sm:w-[420px]"
+        style={{ backgroundColor: "#141218" }}
       >
         <SheetHeader>
           <SheetTitle
@@ -286,7 +286,7 @@ export default function FoodWebDetailSheet({
                   className="rounded-md border p-3"
                   style={{
                     borderColor: HUD.border,
-                    backgroundColor: "#0e0e18",
+                    backgroundColor: "#1a1720",
                   }}
                 >
                   <div
@@ -312,7 +312,7 @@ export default function FoodWebDetailSheet({
                   className="rounded-md border p-3"
                   style={{
                     borderColor: HUD.border,
-                    backgroundColor: "#0e0e18",
+                    backgroundColor: "#1a1720",
                   }}
                 >
                   <div
@@ -352,7 +352,7 @@ export default function FoodWebDetailSheet({
                     className="rounded-md border p-2"
                     style={{
                       borderColor: HUD.border,
-                      backgroundColor: "#0e0e18",
+                      backgroundColor: "#1a1720",
                     }}
                   >
                     <ResponsiveContainer width="100%" height={180}>
@@ -411,7 +411,7 @@ export default function FoodWebDetailSheet({
                       return (
                         <div
                           key={conn.otherId}
-                          className="group flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-[#1a1a2e]/30"
+                          className="group flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-[#2a2420]/30"
                         >
                           <span
                             className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
@@ -443,13 +443,13 @@ export default function FoodWebDetailSheet({
                             )}
                             <div
                               className="h-1 w-16 overflow-hidden rounded-full"
-                              style={{ backgroundColor: "#1a1a2e" }}
+                              style={{ backgroundColor: "#2a2420" }}
                             >
                               <div
                                 className="h-full rounded-full transition-all"
                                 style={{
                                   width: `${pct}%`,
-                                  backgroundColor: hexToRgba(HUD.cyan, 0.55),
+                                  backgroundColor: hexToRgba(HUD.accent, 0.55),
                                 }}
                               />
                             </div>
@@ -458,7 +458,7 @@ export default function FoodWebDetailSheet({
                                 MONO,
                                 "w-5 text-right text-[10px] font-bold",
                               )}
-                              style={{ color: HUD.cyan }}
+                              style={{ color: HUD.accent }}
                             >
                               {conn.weight}
                             </span>
@@ -584,8 +584,8 @@ export default function FoodWebDetailSheet({
                         key={recipe.id}
                         className="rounded-md border-l-2 px-3 py-2"
                         style={{
-                          borderLeftColor: hexToRgba(HUD.cyan, 0.3),
-                          backgroundColor: "#0e0e18",
+                          borderLeftColor: hexToRgba(HUD.accent, 0.3),
+                          backgroundColor: "#1a1720",
                         }}
                       >
                         <span

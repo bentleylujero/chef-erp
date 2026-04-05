@@ -161,9 +161,11 @@ interface RecipeCardProps {
     createdAt: string;
   };
   matchScore?: number;
+  /** Percentage of required ingredients the user currently has in stock (0–100) */
+  pantryOverlap?: number;
 }
 
-export function RecipeCard({ recipe, matchScore }: RecipeCardProps) {
+export function RecipeCard({ recipe, matchScore, pantryOverlap }: RecipeCardProps) {
   const cuisineStyle = CUISINE_STYLES[recipe.cuisine] ?? CUISINE_STYLES.OTHER;
   const cuisineLabel = formatCuisine(recipe.cuisine);
   const sourceLabel = SOURCE_LABELS[recipe.source] ?? recipe.source;
@@ -185,7 +187,24 @@ export function RecipeCard({ recipe, matchScore }: RecipeCardProps) {
                 <DifficultyStars level={recipe.difficulty} />
               </div>
             </div>
-            {matchScore !== undefined && <MatchScoreRing score={matchScore} />}
+            <div className="flex items-center gap-1.5">
+              {pantryOverlap !== undefined && (
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "h-5 px-1.5 text-[10px] font-medium whitespace-nowrap",
+                    pantryOverlap === 100
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : pantryOverlap >= 80
+                        ? "bg-lime-500/15 text-lime-400"
+                        : "bg-amber-500/15 text-amber-400",
+                  )}
+                >
+                  {pantryOverlap}% pantry
+                </Badge>
+              )}
+              {matchScore !== undefined && <MatchScoreRing score={matchScore} />}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-2.5 pt-1">

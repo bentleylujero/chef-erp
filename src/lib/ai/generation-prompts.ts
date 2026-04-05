@@ -81,9 +81,15 @@ function groupByCategory(
 }
 
 export function buildBatchGenerationPrompt(context: {
-  ingredients: Array<{ id: string; name: string; category: string }>;
+  ingredients: Array<{
+    id: string;
+    name: string;
+    category: string;
+    catalogTier?: string;
+  }>;
   cookingStyle: {
     primaryCuisines: string[];
+    exploringCuisines?: string[];
     preferredTechniques: string[];
     cookingPhilosophy: string | null;
   };
@@ -102,9 +108,24 @@ export function buildBatchGenerationPrompt(context: {
   networkMeshMode?: boolean;
   /** NEW_INGREDIENTS mode: names of newly-added ingredients that lack recipe coverage. */
   focusIngredientNames?: string[];
+  /** RAG context: similar recipes from the cookbook embedding index (injected pre-generation). */
+  ragContext?: string;
+  /** COOKBOOK_BUILD mode: mass generation with 90/10 rule. */
+  cookbookBuildMode?: boolean;
+  /** Allowed cuisines whitelist (from user's primary + exploring). */
+  allowedCuisines?: string[];
+  /** EXPIRY_RESCUE mode: names of ingredients expiring within 2-3 days. */
+  expiringIngredientNames?: string[];
+  /** PREFERENCE_DRIFT mode: flavor dimensions where user prefs diverge from cookbook avg. */
+  driftedDimensions?: Array<{
+    dimension: string;
+    userValue: number;
+    cookbookAvg: number;
+  }>;
 }): { system: string; user: string } {
   const bridgeMode = (context.pantryBridgePairs?.length ?? 0) > 0;
   const meshMode = Boolean(context.networkMeshMode) && !bridgeMode;
+  const cookbookBuild = Boolean(context.cookbookBuildMode);
   const bridgeMin =
     context.bridgeMinDistinctIngredients ??
     Math.min(
@@ -112,6 +133,48 @@ export function buildBatchGenerationPrompt(context: {
       Math.max(1, context.ingredients.length),
     );
   const hubList = context.networkHubIngredientNames ?? [];
+
+  // ── CUISINE WHITELIST ──
+  const allCuisines = [
+    ...(context.cookingStyle.primaryCuisines ?? []),
+    ...(context.cookingStyle.exploringCuisines ?? []),
+  ];
+  const allowedCuisines = context.allowedCuisines?.length
+    ? context.allowedCuisines
+    : allCuisines.length > 0
+      ? allCuisines
+      : null; // null = no restriction (fallback for users with no cuisine prefs)
+
+  const cuisineRestriction = allowedCuisines
+    ? `\nCUISINE RESTRICTION: ONLY generate recipes in these cuisines: ${allowedCuisines.map(formatEnum).join(", ")}. Do NOT use any cuisine outside this list. Every recipe's "cuisine" field MUST be one of these.`
+    : "";
+
+  // ── COOKING PHILOSOPHY ──
+  const philosophy = context.cookingStyle.cookingPhilosophy;
+  const philosophyBlock = philosophy
+    ? `\nCOOKING PHILOSOPHY (HARD CONSTRAINT): Every recipe MUST align with this philosophy: "${philosophy}". If a recipe concept conflicts with this philosophy, discard it and generate one that fits. This is non-negotiable — the chef's identity and values drive the entire cookbook.`
+    : "";
+
+  // ── 90/10 RULE (COOKBOOK BUILD MODE) ──
+  const pantryOnlyCount = cookbookBuild
+    ? Math.ceil(context.count * 0.9)
+    : context.count;
+  const substituteCount = cookbookBuild
+    ? context.count - pantryOnlyCount
+    : 0;
+
+  const ninetyTenBlock = cookbookBuild
+    ? `
+90/10 INGREDIENT RULE:
+- The first ${pantryOnlyCount} recipes (indices 0–${pantryOnlyCount - 1}) are PANTRY-ONLY: every ingredient MUST come from AVAILABLE INGREDIENTS exactly.
+- The remaining ${substituteCount} recipe(s) (indices ${pantryOnlyCount}–${context.count - 1}) may include UP TO 2 ingredients NOT in the pantry, BUT each non-pantry ingredient MUST have a "substituteFor" field naming the ideal ingredient, and the "ingredientName" MUST be an AVAILABLE INGREDIENT that works as a reasonable swap.
+  Example: if the recipe ideally uses "Fresh Mozzarella" but the chef has "Ricotta", output: { "ingredientName": "Ricotta", "substituteFor": "Fresh Mozzarella", ... }
+- This means ALL ${context.count} recipes are cookable from the pantry — the substitute recipes just note what the "dream" ingredient would be.
+- The substitute recipes should push the chef slightly outside their comfort zone — more ambitious plating, a technique twist, or a fusion angle — while remaining achievable with pantry swaps.
+`
+    : "";
+
+  // ── BRIDGE BLOCK ──
   const bridgeBlock = bridgeMode
     ? `
 14. PANTRY BRIDGE MODE: You must output exactly ${context.count} recipes — one dedicated recipe per line in PANTRY PAIRS below.
@@ -128,6 +191,7 @@ export function buildBatchGenerationPrompt(context: {
 `
     : "";
 
+  // ── FOCUS (NEW INGREDIENTS) BLOCK ──
   const focusMode =
     !bridgeMode &&
     !meshMode &&
@@ -159,6 +223,7 @@ FRAMEWORK — follow this reasoning chain internally before writing each recipe:
 `
     : "";
 
+  // ── MESH BLOCK ──
   const meshMin =
     context.bridgeMinDistinctIngredients ??
     Math.min(
@@ -179,23 +244,107 @@ FRAMEWORK — follow this reasoning chain internally before writing each recipe:
 `
     : "";
 
+  // ── COOKBOOK BUILD BLOCK ──
+  const cookbookBuildBlock = cookbookBuild
+    ? `
+14. COOKBOOK BUILD MODE — you are generating a large, diverse cookbook section. This is NOT a small batch — you must produce ${context.count} meaningfully different recipes. MAXIMIZE RECIPE COUNT: explore every plausible combination of the available ingredients. Think in terms of ingredient ROLE SWAPS (same protein grilled vs. braised vs. stewed), CUISINE PIVOTS (same vegetables in French vs. Mexican vs. Italian preparations), and MEAL TYPE SHIFTS (the same core ingredients as a salad, soup, main, or side).
+
+CREATIVE GENERATION FRAMEWORK — for each recipe, internally ask:
+  a) What ANCHOR ingredient haven't I featured yet (or haven't used in this cuisine)?
+  b) What SUPPORTING ingredients create a different flavor profile than my previous recipes?
+  c) What TECHNIQUE haven't I used recently?
+  d) What MEAL TYPE is underrepresented so far?
+
+DIVERSITY REQUIREMENTS:
+  a) SPREAD ACROSS MEAL TYPES: Include a mix of breakfasts, lunches, dinners, snacks, and sides. Not all dinner entrees.
+  b) DIFFICULTY RANGE: Include easy weeknight meals (difficulty 2-3), medium-effort dishes (3-4), and ambitious weekend projects (4-5). Weight toward 2-3 for everyday cooking.
+  c) TECHNIQUE VARIETY: Use at least 6 different primary techniques across the batch. Don't default to sauté for everything.
+  d) INGREDIENT ROTATION: Every pantry ingredient should appear in at least 1 recipe. No ingredient should dominate more than 15% of recipes. Rotate proteins, starches, and vegetables deliberately.
+  e) TIME VARIETY: Include quick meals (under 30 min total), medium (30-60 min), and longer projects (60+ min).
+  f) SERVING VARIETY: Mix single-serving, couple (2), family (4), and batch/meal-prep (6-8) sizes.
+  g) COMBINATION MINING: For N pantry ingredients, there are exponentially many valid combinations. Push beyond the obvious — a pantry with chicken, rice, peppers, and onions can make stir-fry, arroz con pollo, stuffed peppers, chicken soup, fried rice, fajitas, and more. Find those combinations.
+
+15. ANTI-STALENESS: No two recipes should share more than 70% of their ingredients. If you notice repetition, pivot to a different cuisine, technique, or protein anchor.
+
+16. ${ninetyTenBlock}
+`
+    : "";
+
+  // ── EXPIRY RESCUE BLOCK ──
+  const expiryMode =
+    !bridgeMode &&
+    !meshMode &&
+    !cookbookBuild &&
+    (context.expiringIngredientNames?.length ?? 0) > 0;
+  const expiryNames = context.expiringIngredientNames ?? [];
+
+  const expiryRescueBlock = expiryMode
+    ? `
+14. EXPIRY RESCUE MODE — the following ingredients are expiring within 1-2 days and MUST be used up. This is the chef's top priority.
+
+EXPIRING INGREDIENTS (use these FIRST):
+${expiryNames.map((n) => `- ${n}`).join("\n")}
+
+RULES:
+  - Every EXPIRING INGREDIENT must appear as REQUIRED (non-optional) in at least one recipe.
+  - Each recipe should feature at least one expiring ingredient as a PRIMARY component (not a garnish).
+  - Prioritize recipes that use MULTIPLE expiring ingredients together when they pair well.
+  - Keep recipes quick and practical (prefer difficulty 2-3, total time under 45 min) — the chef needs to cook these soon.
+  - Tag every recipe with "expiry-rescue" in the tags array.
+  - You may add other AVAILABLE INGREDIENTS to complete the dish, but expiring items drive the recipe design.
+`
+    : "";
+
+  // ── PREFERENCE DRIFT BLOCK ──
+  const driftMode =
+    !bridgeMode &&
+    !meshMode &&
+    !cookbookBuild &&
+    !expiryMode &&
+    (context.driftedDimensions?.length ?? 0) > 0;
+  const driftDims = context.driftedDimensions ?? [];
+
+  const preferenceDriftBlock = driftMode
+    ? `
+14. PREFERENCE DRIFT MODE — the chef's flavor preferences have shifted away from what the cookbook currently offers. Generate recipes that close this gap.
+
+DRIFTED DIMENSIONS:
+${driftDims.map((d) => `- ${formatEnum(d.dimension)}: chef prefers ${d.userValue}/10, cookbook average is ${d.cookbookAvg.toFixed(1)}/10 (${d.userValue > d.cookbookAvg ? "needs MORE" : "needs LESS"})`).join("\n")}
+
+RULES:
+  - Each recipe's flavorTags MUST reflect the chef's actual preferences, not the cookbook average.
+${driftDims.map((d) => `  - Set "${d.dimension}" flavorTag to ${Math.round(d.userValue)} (or close) — ${d.userValue > d.cookbookAvg ? "push this dimension UP" : "pull this dimension DOWN"}.`).join("\n")}
+  - Recipes should feel natural and delicious, not artificially skewed — find dishes where these flavor levels occur organically.
+  - Tag every recipe with "preference-drift" in the tags array.
+  - Spread across different cuisines and techniques for variety.
+`
+    : "";
+
   const system = `ROLE: You are the recipe JSON engine inside Chef Bentley's Kitchen ERP. Your output is parsed by strict software — not read for prose quality. Audience: intermediate–professional cooks.
 
 OUTPUT: Exactly one JSON object: {"recipes":[ ... ]} with length ${context.count}. No markdown fences, no preamble, no postscript.
 
-COMPUTE / TOKEN DISCIPLINE: Use the minimum text that remains unambiguous. description: max 2 short sentences. Each instructions[].step: one clear imperative sentence (two only if safety or timing demands it). Omit filler adjectives. Put quantities only in ingredients[], not repeated in steps.
+INSTRUCTION QUALITY: Write directions a professional cook would respect.
+- description: 2–3 vivid sentences that sell the dish — mention the dominant flavor profile, key technique, and what makes it satisfying.
+- Each instructions[].step: 2–3 sentences. Lead with the action, then explain WHAT TO LOOK FOR (visual/aural/textural cue) and WHY (the culinary reason). Example: "Sear the chicken skin-side down without moving it. Wait for the skin to turn deep golden and release naturally from the pan — this builds the fond that flavors the sauce. About 4–5 minutes."
+- Include technique-specific cues: color changes, aromas, textures, sounds (sizzle fading = moisture gone, etc.).
+- Put quantities only in ingredients[], not repeated in steps. But DO reference timing, temperature, and doneness indicators in steps.
+- Vary sentence structure — do not start every step with the same pattern.
 
 RULES:
-1. ingredientName must exactly match a name from AVAILABLE INGREDIENTS (user message).
+1. ingredientName must exactly match a name from AVAILABLE INGREDIENTS (user message) — same spelling and capitalization as listed.
 2. Honor chef skill, style, and equipment from the user message — calibrate difficulty and methods accordingly.
 3. instructions[].technique must be exactly one of: ${VALID_TECHNIQUES.join(", ")}
-4. cuisine must be exactly one of: ${VALID_CUISINES.join(", ")}
+4. cuisine must be exactly one of: ${allowedCuisines ? allowedCuisines.join(", ") : VALID_CUISINES.join(", ")}
 5. techniques[] = deduplicated list of techniques used across steps.
 6. Do not reuse any title from EXISTING RECIPE TITLES.
 7. difficulty integer 2–5; prepTime and cookTime integers (minutes); servings integer ≥1.
 8. flavorTags: integers 0–10 for keys spicy, sweet, umami, acidic, rich, light.
-9. tags: short lowercase hooks (e.g. comfort, weeknight, meal-prep, one-pot).
-10. Recipes must differ meaningfully (protein/starch, cuisine lean, or primary technique).${newIngredientsBlock}${bridgeBlock}${meshBlock}
+9. tags: short lowercase hooks (e.g. comfort, weeknight, meal-prep, one-pot, breakfast, lunch, dinner, snack, side, appetizer, date-night, batch-cook).
+10. Recipes must differ meaningfully (protein/starch, cuisine lean, or primary technique).
+11. PANTRY-ONLY (unless 90/10 rule applies): The chef has ONLY the items under AVAILABLE INGREDIENTS. Every ingredients[].ingredientName MUST be copied exactly from that list. Never invent or imply items they do not stock.
+12. TITLE, DESCRIPTION, and every instructions[].step: do not name any food, herb, spice, protein, vegetable, starch, noodle shape, or cheese unless that exact name (as listed in AVAILABLE INGREDIENTS) appears in this recipe's ingredients[] array. Wrong: "Tomato Basil Rigatoni" without a Basil line matching the pantry list. Right: names that only reflect ingredients you actually listed (e.g. if the pantry lists "Oregano" not "Basil", say oregano or stay generic).
+13. The finished recipe must be honestly cookable from ingredients[] alone — no "pantry staples" or unlisted assumptions.${philosophyBlock}${cuisineRestriction}${newIngredientsBlock}${bridgeBlock}${meshBlock}${cookbookBuildBlock}${expiryRescueBlock}${preferenceDriftBlock}
 
 EACH recipes[] ELEMENT SCHEMA:
 {
@@ -204,7 +353,7 @@ EACH recipes[] ELEMENT SCHEMA:
   "cuisine": string,
   "difficulty": number,
   "techniques": string[],
-  "ingredients": [{ "ingredientName": string, "quantity": number, "unit": string, "isOptional": boolean, "prepNote": string | undefined }],
+  "ingredients": [{ "ingredientName": string, "quantity": number, "unit": string, "isOptional": boolean, "prepNote": string | undefined, "substituteFor": string | undefined }],
   "instructions": [{ "step": string, "technique": string, "timing": string | undefined, "notes": string | undefined }],
   "prepTime": number,
   "cookTime": number,
@@ -217,28 +366,45 @@ EACH recipes[] ELEMENT SCHEMA:
     ? `\nFOCUS: Generate recipes primarily in ${formatEnum(context.targetCuisine)} cuisine.`
     : "";
 
+  const adHocNames = context.ingredients
+    .filter((i) => i.catalogTier === "USER_AD_HOC")
+    .map((i) => i.name);
+  const catalogTierNote =
+    adHocNames.length > 0
+      ? `\nCATALOG NOTE: Names below are the canonical strings you must use in ingredientName. Items only in this list as user-added (USER_AD_HOC) are: ${adHocNames.join(", ")}. Prefer treating SYSTEM-style naming as the mental model for flavor pairing, but never invent a different spelling than the listed name.`
+      : "";
+
   const philosophyLine = context.cookingStyle.cookingPhilosophy
     ? `- Cooking Philosophy: ${context.cookingStyle.cookingPhilosophy}`
     : "";
+
+  const exploringLine =
+    (context.cookingStyle.exploringCuisines?.length ?? 0) > 0
+      ? `\n- Exploring Cuisines: ${context.cookingStyle.exploringCuisines!.map(formatEnum).join(", ")}`
+      : "";
 
   const user = `Task: emit ${context.count} recipes in the JSON object.${cuisineDirective}
 
 CHEF PROFILE:
 - Skill Level: ${formatEnum(context.skillLevel)}
-- Primary Cuisines: ${context.cookingStyle.primaryCuisines.map(formatEnum).join(", ") || "Eclectic — no strong preference"}
+- Primary Cuisines: ${context.cookingStyle.primaryCuisines.map(formatEnum).join(", ") || "Eclectic — no strong preference"}${exploringLine}
 - Preferred Techniques: ${context.cookingStyle.preferredTechniques.map(formatEnum).join(", ") || "Open to all techniques"}${philosophyLine ? "\n" + philosophyLine : ""}
 
 AVAILABLE EQUIPMENT:
 ${context.equipment.length > 0 ? context.equipment.join(", ") : "Standard home kitchen (oven, stovetop, basic pots/pans, blender, food processor)"}
 
-AVAILABLE INGREDIENTS:
-${groupByCategory(context.ingredients)}
+AVAILABLE INGREDIENTS (this is the complete, exclusive list — nothing else exists in the kitchen):
+${groupByCategory(context.ingredients)}${catalogTierNote}
 
 ${
   context.existingTitles.length > 0
     ? `EXISTING RECIPE TITLES (do NOT duplicate these):\n${context.existingTitles.map((t) => `- ${t}`).join("\n")}`
     : "No existing recipes — this is the chef's first batch."
 }${
+    context.ragContext
+      ? `\n\nRELATED COOKBOOK RECIPES (for inspiration — do not duplicate, but use as flavor/technique reference):\n${context.ragContext}`
+      : ""
+  }${
     bridgeMode && context.pantryBridgePairs
       ? `\n\nPANTRY PAIRS (one new recipe per line — both ingredients required in that recipe):\n${context.pantryBridgePairs.map((p, i) => `${i + 1}. "${p.nameA}" + "${p.nameB}"`).join("\n")}`
       : ""
@@ -253,6 +419,14 @@ ${
   }${
     meshMode && hubList.length >= 2
       ? `\n\nCOOKBOOK NETWORK HUBS (mesh pass — anchor each recipe in the graph backbone; exact names):\n${hubList.slice(0, 24).join(", ")}`
+      : ""
+  }${
+    expiryMode && expiryNames.length > 0
+      ? `\n\nEXPIRING SOON (must be used as required ingredients — these expire in 1-2 days):\n${expiryNames.map((n) => `- ${n}`).join("\n")}`
+      : ""
+  }${
+    driftMode && driftDims.length > 0
+      ? `\n\nFLAVOR DRIFT TARGETS (generate recipes that match these preference levels):\n${driftDims.map((d) => `- ${formatEnum(d.dimension)}: target ${d.userValue}/10 (cookbook currently averages ${d.cookbookAvg.toFixed(1)})`).join("\n")}`
       : ""
   }`;
 
@@ -274,11 +448,12 @@ export function buildSingleRecipePrompt(context: {
 EFFICIENCY: Tight description (≤2 short sentences). One imperative sentence per instruction step unless split is necessary.
 
 RULES:
-1. ingredientName values only from AVAILABLE INGREDIENTS; exact spelling.
+1. ingredientName values only from AVAILABLE INGREDIENTS; exact spelling as listed.
 2. instructions[].technique must be one of: ${VALID_TECHNIQUES.join(", ")}
 3. cuisine must be one of: ${VALID_CUISINES.join(", ")}
 4. difficulty 1–5; techniques[] deduped from steps.
-5. Practical for same-day cooking with listed pantry.
+5. Practical for same-day cooking with listed pantry only — no unlisted foods in title, description, or steps.
+6. Title and description must not name any ingredient not present in ingredients[] with the exact AVAILABLE name.
 
 SCHEMA:
 {

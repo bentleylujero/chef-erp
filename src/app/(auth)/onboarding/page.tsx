@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { toast } from "sonner";
 import {
   ChefHat,
   ArrowRight,
@@ -17,21 +19,51 @@ import {
   Bean,
   Sparkles,
   Package,
+  ClipboardList,
+  Receipt,
+  Loader2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import type { PantryParsedItem } from "@/lib/ai/pantry-list-parser";
 import {
   IngredientAutocomplete,
   type SelectedIngredient,
 } from "@/components/ingredient-autocomplete";
 import { VoiceInput } from "@/components/voice-input";
+import { Label } from "@/components/ui/label";
 
 const TOTAL_STEPS = 4;
+const MESSY_LIST_CHAR_SOFT_LIMIT = 12_000;
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function mergePantryFromServer(
+  prev: { name: string; quantity: number; unit: string }[],
+  server: { name: string; quantity: number; unit: string }[],
+) {
+  const keys = new Set(prev.map((p) => p.name.toLowerCase()));
+  const additions = server.filter((s) => !keys.has(s.name.toLowerCase()));
+  return additions.length > 0 ? [...prev, ...additions] : prev;
+}
+
+function readMessyListError(data: unknown): string {
+  if (!data || typeof data !== "object") return "Request failed";
+  const err = (data as { error?: unknown }).error;
+  if (typeof err === "string" && err.trim()) return err;
+  return "Request failed";
+}
+
+type MessyListRow = { item: PantryParsedItem; selected: boolean };
 
 // ── Cuisine Data ──────────────────────────────────────────────────
 
@@ -150,6 +182,31 @@ export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [chefName, setChefName] = useState("Chef");
+  const [chefEmail, setChefEmail] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          name?: string;
+          email?: string;
+          userId?: string | null;
+        };
+        if (cancelled) return;
+        if (data.name?.trim()) setChefName(data.name.trim());
+        if (data.email?.trim()) setChefEmail(data.email.trim());
+      } catch {
+        /* keep defaults */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Step 1
   const [primaryCuisines, setPrimaryCuisines] = useState<string[]>([]);
@@ -180,6 +237,41 @@ export default function OnboardingPage() {
   const [pantrySearch, setPantrySearch] = useState("");
   const [pantryQty, setPantryQty] = useState<number>(1);
   const [pantryUnit, setPantryUnit] = useState("count");
+  const [messyListText, setMessyListText] = useState("");
+  const [messyListParsing, setMessyListParsing] = useState(false);
+  const [messyListRows, setMessyListRows] = useState<MessyListRow[] | null>(
+    null,
+  );
+
+  const pantryBootstrapDone = useRef(false);
+  useEffect(() => {
+    if (pantryBootstrapDone.current) return;
+    pantryBootstrapDone.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/inventory", { credentials: "include" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as Array<{
+          ingredient: { name: string };
+          quantity: number;
+          unit: string;
+        }>;
+        if (cancelled || !Array.isArray(data)) return;
+        const mapped = data.map((row) => ({
+          name: row.ingredient.name,
+          quantity: row.quantity,
+          unit: row.unit,
+        }));
+        setPantryItems((prev) => mergePantryFromServer(prev, mapped));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleCuisine = useCallback(
     (list: string[], setList: (v: string[]) => void, id: string) => {
@@ -221,15 +313,87 @@ export default function OnboardingPage() {
     setPantryItems([...pantryItems, ...newItems]);
   }
 
+  const parseMessyList = useCallback(async () => {
+    const t = messyListText.trim();
+    if (!t) {
+      toast.error("Add your list first");
+      return;
+    }
+    setMessyListParsing(true);
+    try {
+      const res = await fetch("/api/ai/parse-pantry-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ text: t }),
+      });
+      const data: unknown = await res.json();
+      if (!res.ok) throw new Error(readMessyListError(data));
+      const items = (data as { items?: PantryParsedItem[] }).items ?? [];
+      if (items.length === 0) {
+        toast.message("No ingredients found", {
+          description: "Try one item per line or separate with commas.",
+        });
+        return;
+      }
+      if (t.length > MESSY_LIST_CHAR_SOFT_LIMIT) {
+        toast.message("Long list", {
+          description: `Only the first ${MESSY_LIST_CHAR_SOFT_LIMIT.toLocaleString()} characters were parsed.`,
+        });
+      }
+      setMessyListRows(items.map((item) => ({ item, selected: true })));
+      toast.success(
+        `Parsed ${items.length} ingredient${items.length === 1 ? "" : "s"}`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not parse list");
+    } finally {
+      setMessyListParsing(false);
+    }
+  }, [messyListText]);
+
+  const addMessySelectionToPantry = useCallback(() => {
+    if (!messyListRows?.length) return;
+    const chosen = messyListRows.filter((r: MessyListRow) => r.selected);
+    if (chosen.length === 0) {
+      toast.error("Select at least one ingredient");
+      return;
+    }
+    setPantryItems((prev) => {
+      const next = [...prev];
+      const keys = new Set(next.map((p) => p.name.toLowerCase()));
+      for (const { item } of chosen) {
+        const name = item.parsedName.trim();
+        if (!name) continue;
+        const k = name.toLowerCase();
+        if (!keys.has(k)) {
+          keys.add(k);
+          next.push({
+            name,
+            quantity: item.quantity,
+            unit: item.unit,
+          });
+        }
+      }
+      return next;
+    });
+    setMessyListRows(null);
+    setMessyListText("");
+    toast.success(
+      `Added ${chosen.length} item${chosen.length === 1 ? "" : "s"} to your pantry list`,
+    );
+  }, [messyListRows]);
+
   async function handleFinish() {
     setIsSubmitting(true);
     try {
       const res = await fetch("/api/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
-          name: "Chef",
-          email: "chef@bentley.kitchen",
+          name: chefName.trim(),
+          email: chefEmail.trim(),
           skillLevel,
           kitchenEquipment: equipment,
           dietaryRestrictions: dietary,
@@ -255,7 +419,11 @@ export default function OnboardingPage() {
   const canProceed = () => {
     switch (step) {
       case 1:
-        return primaryCuisines.length > 0;
+        return (
+          primaryCuisines.length > 0 &&
+          chefName.trim().length > 0 &&
+          isValidEmail(chefEmail)
+        );
       case 2:
         return true;
       case 3:
@@ -304,6 +472,30 @@ export default function OnboardingPage() {
                 <p className="text-muted-foreground text-lg">
                   This helps us build a cookbook tailored to your kitchen.
                 </p>
+              </div>
+
+              <div className="mx-auto grid max-w-md gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-1">
+                  <Label htmlFor="onboard-name">Your name</Label>
+                  <Input
+                    id="onboard-name"
+                    value={chefName}
+                    onChange={(e) => setChefName(e.target.value)}
+                    autoComplete="name"
+                    placeholder="Chef"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-1">
+                  <Label htmlFor="onboard-email">Email</Label>
+                  <Input
+                    id="onboard-email"
+                    type="email"
+                    value={chefEmail}
+                    onChange={(e) => setChefEmail(e.target.value)}
+                    autoComplete="email"
+                    placeholder="you@kitchen.com"
+                  />
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -615,6 +807,159 @@ export default function OnboardingPage() {
                   Tell us what you have, and we&apos;ll build recipes around it.
                 </p>
               </div>
+
+              {/* Messy list → AI pantry */}
+              <Card className="border-primary/15">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ClipboardList className="size-5 opacity-80" />
+                    Messy pantry list (AI)
+                  </CardTitle>
+                  <p className="text-muted-foreground text-sm font-normal leading-relaxed">
+                    Walk through your real pantry and type everything you have—messy
+                    is fine. Include{" "}
+                    <span className="text-foreground font-medium">
+                      amounts when you can
+                    </span>{" "}
+                    (cups, lbs, &quot;half a bag&quot;, etc.) so we can stock your
+                    virtual pantry accurately. Our AI will parse the list and you
+                    can add the matches below.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {!messyListRows ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="messy-pantry">Your list</Label>
+                        <span className="text-muted-foreground text-[10px] tabular-nums">
+                          {messyListText.length.toLocaleString()} chars
+                          {messyListText.length > MESSY_LIST_CHAR_SOFT_LIMIT ? (
+                            <span className="text-amber-600 dark:text-amber-400">
+                              {" "}
+                              (first{" "}
+                              {MESSY_LIST_CHAR_SOFT_LIMIT.toLocaleString()} sent)
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                      <Textarea
+                        id="messy-pantry"
+                        placeholder={`e.g.\n2 lb salmon fillet\nold bay, 3 lemons\nquinoa 2 cups\nparm wedge\nheavy cream`}
+                        value={messyListText}
+                        onChange={(e) => setMessyListText(e.target.value)}
+                        disabled={messyListParsing}
+                        className="min-h-[140px] font-mono text-sm"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => void parseMessyList()}
+                        disabled={messyListParsing || !messyListText.trim()}
+                        className="w-full sm:w-auto"
+                      >
+                        {messyListParsing ? (
+                          <>
+                            <Loader2 className="mr-2 size-4 animate-spin" />
+                            Parsing…
+                          </>
+                        ) : (
+                          "Parse list with AI"
+                        )}
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-muted-foreground text-sm">
+                        Review parsed lines. Uncheck anything you don&apos;t want,
+                        then add to your pantry list.
+                      </p>
+                      <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-2">
+                        {messyListRows.map((row: MessyListRow, i: number) => (
+                          <label
+                            key={`${row.item.rawLine}-${i}`}
+                            className="hover:bg-muted/50 flex cursor-pointer items-start gap-3 rounded-md px-2 py-1.5"
+                          >
+                            <Checkbox
+                              checked={row.selected}
+                              onCheckedChange={(c) =>
+                                setMessyListRows((prev: MessyListRow[] | null) =>
+                                  prev
+                                    ? prev.map((r: MessyListRow, j: number) =>
+                                        j === i
+                                          ? { ...r, selected: !!c }
+                                          : r,
+                                      )
+                                    : null,
+                                )
+                              }
+                              className="mt-0.5"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="font-medium">
+                                {row.item.parsedName}
+                              </span>
+                              <span className="text-muted-foreground ml-2 text-xs">
+                                {row.item.quantity} {row.item.unit}
+                              </span>
+                              <span className="text-muted-foreground block truncate text-[11px]">
+                                {row.item.rawLine}
+                              </span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          onClick={addMessySelectionToPantry}
+                        >
+                          Add selected to pantry list
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setMessyListRows(null);
+                            setMessyListText("");
+                          }}
+                        >
+                          Discard
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Receipt scan */}
+              <Card>
+                <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="bg-primary/10 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                      <Receipt className="text-primary h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold">Scan a receipt</div>
+                      <p className="text-muted-foreground text-xs leading-relaxed">
+                        Upload a photo of a grocery receipt. We read line items and
+                        add them to your pantry. When you&apos;re done, use{" "}
+                        <span className="text-foreground font-medium">
+                          Continue setup
+                        </span>{" "}
+                        to return here and finish onboarding.
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    href={`/pantry/scan?returnTo=${encodeURIComponent("/onboarding")}`}
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                      "inline-flex shrink-0",
+                    )}
+                  >
+                    Open receipt scan
+                  </Link>
+                </CardContent>
+              </Card>
 
               {/* Quick Add */}
               <Card>

@@ -1,31 +1,31 @@
 // ---------------------------------------------------------------------------
-// Palette
+// Palette — "Culinary Cartography" warm dark theme
 // ---------------------------------------------------------------------------
 
 export const HUD = {
-  bg: "#08080d",
-  panel: "rgba(8,8,13,0.82)",
-  border: "rgba(26,26,46,0.7)",
-  cyan: "#00e5ff",
-  cyanDim: "rgba(0,229,255,0.15)",
-  amber: "#ffab00",
-  green: "#0eca78",
-  textPrimary: "#e2e8f0",
-  textMuted: "#94a3b8",
-  textDim: "#475569",
-  textGhost: "#334155",
+  bg: "#13121a",
+  panel: "rgba(18,17,24,0.88)",
+  border: "rgba(58,48,36,0.45)",
+  accent: "#d4a574",
+  accentDim: "rgba(212,165,116,0.12)",
+  amber: "#e8a849",
+  green: "#5cb87a",
+  textPrimary: "#ede6dc",
+  textMuted: "#a89b8c",
+  textDim: "#6b5f53",
+  textGhost: "#3d362e",
 } as const;
 
-/** Obsidian graph-inspired canvas palette. */
+/** Warm cartographic canvas palette. */
 export const WEB = {
-  canvasBg: "#141418",
-  edge: "rgba(200, 205, 218, 0.28)",
-  edgeDim: "rgba(200, 205, 218, 0.12)",
-  edgeHover: "rgba(230, 235, 240, 0.42)",
-  edgeGlow: "rgba(230, 235, 240, 0.08)",
-  dotNoise: "rgba(255, 255, 255, 0.018)",
-  label: "#d0d0d0",
-  labelMuted: "#8c8c8c",
+  canvasBg: "#161519",
+  edge: "rgba(200, 190, 175, 0.28)",
+  edgeDim: "rgba(200, 190, 175, 0.12)",
+  edgeHover: "rgba(230, 220, 205, 0.42)",
+  edgeGlow: "rgba(230, 220, 205, 0.08)",
+  dotNoise: "rgba(212,165,116,0.015)",
+  label: "#d8cfc4",
+  labelMuted: "#8a7e72",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -156,6 +156,7 @@ export const CATEGORY_GROUPS: { label: string; categories: string[] }[] = [
 // ---------------------------------------------------------------------------
 
 export function hexToRgba(hex: string, alpha: number): string {
+  if (!hex) return `rgba(0,0,0,${alpha})`;
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);

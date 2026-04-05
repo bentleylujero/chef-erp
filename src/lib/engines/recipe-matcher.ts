@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 import { cosineSimilarity, weightedScore } from "@/lib/utils/scoring";
 import { addDays } from "date-fns";
 import type { Technique } from "@prisma/client";
@@ -6,14 +7,25 @@ import type { Technique } from "@prisma/client";
 export interface MatchScore {
   recipeId: string;
   title: string;
+  description: string;
   cuisine: string;
   difficulty: number;
+  techniques: string[];
+  prepTime: number;
+  cookTime: number;
+  servings: number;
+  tags: string[];
+  source: string;
+  totalCooks: number;
+  avgRating: number | null;
+  createdAt: Date;
   pantryOverlap: number;
   flavorMatch: number;
   cuisineAffinity: number;
   techniqueComfort: number;
   expiryBonus: number;
   total: number;
+  _count: { ingredients: number; ratings: number };
 }
 
 export interface MatchContext {
@@ -22,6 +34,8 @@ export interface MatchContext {
   maxDifficulty?: number;
   maxTime?: number;
   limit?: number;
+  /** Minimum pantry overlap percentage (0–100). Recipes below this are excluded. Default: 80 */
+  minPantryOverlap?: number;
 }
 
 const COMFORT_MAP: Record<number, number> = {
@@ -45,7 +59,7 @@ const FLAVOR_PROFILE_KEYS: Record<string, string> = {
 export async function matchRecipes(
   context: MatchContext,
 ): Promise<MatchScore[]> {
-  const { userId, targetCuisine, maxDifficulty, maxTime, limit = 20 } = context;
+  const { userId, targetCuisine, maxDifficulty, maxTime, limit = 50, minPantryOverlap = 80 } = context;
 
   const [user, recipes] = await Promise.all([
     prisma.user.findUniqueOrThrow({
@@ -58,9 +72,10 @@ export async function matchRecipes(
       },
     }),
     prisma.recipe.findMany({
-      where: { status: "active" },
+      where: { status: "active", AND: [recipeVisibilityClause(userId)] },
       include: {
         ingredients: { select: { ingredientId: true, isOptional: true } },
+        _count: { select: { ratings: true } },
       },
     }),
   ]);
@@ -103,6 +118,9 @@ export async function matchRecipes(
     ).length;
     const pantryOverlap = totalRequired > 0 ? (matchedCount / totalRequired) * 100 : 100;
 
+    // Skip recipes that fall below the minimum pantry overlap threshold
+    if (pantryOverlap < minPantryOverlap) continue;
+
     const recipeFlavorVec = (recipe.flavorTags ?? {}) as Record<string, number>;
     const flavorMatch =
       Object.keys(userFlavorVec).length > 0
@@ -113,9 +131,9 @@ export async function matchRecipes(
     if (primaryCuisines.has(recipe.cuisine)) {
       cuisineAffinity = 100;
     } else if (exploringCuisines.has(recipe.cuisine)) {
-      cuisineAffinity = 70;
+      cuisineAffinity = 75;
     } else {
-      cuisineAffinity = 30;
+      cuisineAffinity = 35;
     }
 
     let techniqueComfort: number;
@@ -141,24 +159,35 @@ export async function matchRecipes(
     }
 
     const total = weightedScore([
-      { value: pantryOverlap, weight: 35 },
-      { value: flavorMatch, weight: 25 },
-      { value: cuisineAffinity, weight: 20 },
-      { value: techniqueComfort, weight: 10 },
-      { value: expiryBonus, weight: 10 },
+      { value: pantryOverlap, weight: 25 },
+      { value: flavorMatch, weight: 15 },
+      { value: cuisineAffinity, weight: 30 },
+      { value: techniqueComfort, weight: 15 },
+      { value: expiryBonus, weight: 15 },
     ]);
 
     scored.push({
       recipeId: recipe.id,
       title: recipe.title,
+      description: recipe.description,
       cuisine: recipe.cuisine,
       difficulty: recipe.difficulty,
+      techniques: recipe.techniques as string[],
+      prepTime: recipe.prepTime,
+      cookTime: recipe.cookTime,
+      servings: recipe.servings,
+      tags: recipe.tags,
+      source: recipe.source,
+      totalCooks: recipe.totalCooks,
+      avgRating: recipe.avgRating ? Number(recipe.avgRating) : null,
+      createdAt: recipe.createdAt,
       pantryOverlap: Math.round(pantryOverlap * 100) / 100,
       flavorMatch: Math.round(flavorMatch * 100) / 100,
       cuisineAffinity,
       techniqueComfort: Math.round(techniqueComfort * 100) / 100,
       expiryBonus,
       total: Math.round(total * 100) / 100,
+      _count: { ingredients: recipe.ingredients.length, ratings: recipe._count.ratings },
     });
   }
 

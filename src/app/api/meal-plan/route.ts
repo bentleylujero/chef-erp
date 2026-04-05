@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { startOfWeek, parseISO } from "date-fns";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 function getMonday(dateStr?: string | null): Date {
   const base = dateStr ? parseISO(dateStr) : new Date();
@@ -11,13 +10,17 @@ function getMonday(dateStr?: string | null): Date {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireApiUserId();
+  if ("response" in auth) return auth.response;
+  const { userId } = auth;
+
   const { searchParams } = request.nextUrl;
   const weekStart = getMonday(searchParams.get("weekStart"));
 
   try {
     let plan = await prisma.mealPlan.findUnique({
       where: {
-        userId_weekStart: { userId: DEMO_USER_ID, weekStart },
+        userId_weekStart: { userId, weekStart },
       },
       include: {
         entries: {
@@ -46,7 +49,7 @@ export async function GET(request: NextRequest) {
 
     if (!plan) {
       plan = await prisma.mealPlan.create({
-        data: { userId: DEMO_USER_ID, weekStart },
+        data: { userId, weekStart },
         include: {
           entries: {
             include: {
@@ -91,6 +94,10 @@ const createEntrySchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = createEntrySchema.safeParse(body);
 
@@ -107,9 +114,9 @@ export async function POST(request: NextRequest) {
 
     const plan = await prisma.mealPlan.upsert({
       where: {
-        userId_weekStart: { userId: DEMO_USER_ID, weekStart },
+        userId_weekStart: { userId, weekStart },
       },
-      create: { userId: DEMO_USER_ID, weekStart },
+      create: { userId, weekStart },
       update: {},
     });
 

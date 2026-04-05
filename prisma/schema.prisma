@@ -135,8 +135,20 @@ enum RecipeSource {
   AI_INGREDIENT_FILL
   AI_PANTRY_BRIDGE
   AI_NETWORK_MESH
+  AI_COOKBOOK_BUILD
   USER_CREATED
   IMPORTED
+}
+
+enum IngredientCatalogTier {
+  SYSTEM
+  USER_AD_HOC
+}
+
+enum IngredientAliasSource {
+  SEED
+  LEARNED
+  ADMIN
 }
 
 enum GenerationTrigger {
@@ -150,6 +162,7 @@ enum GenerationTrigger {
   CHAT_REQUEST
   MANUAL_REQUEST
   INGREDIENT_FILL
+  COOKBOOK_BUILD
 }
 
 enum GenerationJobStatus {
@@ -253,6 +266,7 @@ model User {
   cuisineExplorations   CuisineExploration[]
   techniqueLogs         TechniqueLog[]
   pantryBridgeAttempts  PantryBridgeAttempt[]
+  ownedRecipes          Recipe[]              @relation("RecipeOwner")
 
   @@index([email])
 }
@@ -291,26 +305,43 @@ model CookingStyle {
 // ─────────────────────────────────────────────
 
 model Ingredient {
-  id              String             @id @default(cuid())
-  name            String             @unique
+  id              String                 @id @default(cuid())
+  name            String                 @unique
   category        IngredientCategory
-  defaultUnit     String             // "g", "ml", "count", "bunch", etc.
+  defaultUnit     String                 // "g", "ml", "count", "bunch", etc.
   shelfLifeDays   Int?
-  storageType     StorageType        @default(PANTRY)
+  storageType     StorageType            @default(PANTRY)
   avgPricePerUnit Float?
   cuisineTags     Cuisine[]
-  flavorTags      Json               @default("{}") // { "spicy": 0, "sweet": 3, "umami": 7, ... }
+  flavorTags      Json                   @default("{}") // { "spicy": 0, "sweet": 3, "umami": 7, ... }
   description     String?
-  createdAt       DateTime           @default(now())
+  catalogTier     IngredientCatalogTier  @default(USER_AD_HOC)
+  createdAt       DateTime               @default(now())
 
-  inventory       Inventory[]
-  recipeIngredients RecipeIngredient[]
-  purchaseHistory PurchaseHistory[]
-  groceryItems    GroceryItem[]
-  cuisineStarterItems CuisineStarterItem[]
+  inventory            Inventory[]
+  recipeIngredients    RecipeIngredient[]
+  purchaseHistory      PurchaseHistory[]
+  groceryItems         GroceryItem[]
+  cuisineStarterItems  CuisineStarterItem[]
+  aliases              IngredientAlias[]
 
   @@index([name])
   @@index([category])
+  @@index([catalogTier])
+}
+
+model IngredientAlias {
+  id               String                @id @default(cuid())
+  ingredientId     String
+  aliasNormalized  String                @unique
+  displayAlias     String?
+  locale           String?
+  source           IngredientAliasSource   @default(SEED)
+  createdAt        DateTime              @default(now())
+
+  ingredient       Ingredient            @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@index([ingredientId])
 }
 
 model Inventory {
@@ -355,6 +386,7 @@ model Recipe {
   source                RecipeSource
   parentRecipeId        String?      // for variants
   generationJobId       String?
+  ownerUserId           String?      // null = system/legacy shared; set for user cookbook
   pantrySnapshotAtGen   Json?        // ingredient IDs available when this was generated
   platePrice            Float?       // for food cost % calculation
   totalCooks            Int          @default(0)
@@ -366,6 +398,7 @@ model Recipe {
   parentRecipe          Recipe?      @relation("RecipeVariants", fields: [parentRecipeId], references: [id])
   variants              Recipe[]     @relation("RecipeVariants")
   generationJob         GenerationJob? @relation(fields: [generationJobId], references: [id])
+  owner                 User?        @relation("RecipeOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   ingredients           RecipeIngredient[]
   ratings               RecipeRating[]
   cookingLogs           CookingLog[]
@@ -376,6 +409,7 @@ model Recipe {
   @@index([parentRecipeId])
   @@index([createdAt])
   @@index([avgRating])
+  @@index([ownerUserId])
 }
 
 model RecipeIngredient {
@@ -387,6 +421,7 @@ model RecipeIngredient {
   isOptional      Boolean    @default(false)
   prepNote        String?    // "brunoise", "chiffonade", "rendered"
   substituteGroup String?    // group ID for known substitution clusters
+  substituteFor   String?    // "ideally use [X] but [this ingredient] works as a swap"
 
   recipe          Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
   ingredient      Ingredient @relation(fields: [ingredientId], references: [id])

@@ -3,8 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { updateFlavorProfileFromSignals } from "@/lib/engines/preference-aggregator";
 import { Technique, type Prisma } from "@prisma/client";
 import { z } from "zod";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
+import { deductPantryForCookedRecipe } from "@/lib/engines/inventory-cook-deduction";
 
 const TECHNIQUE_SET = new Set<string>(Object.values(Technique));
 
@@ -54,6 +54,10 @@ const cookingLogBodySchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const json = await request.json();
     const parsed = cookingLogBodySchema.safeParse(json);
     if (!parsed.success) {
@@ -99,10 +103,10 @@ export async function POST(request: NextRequest) {
       ...(servingsCooked != null ? { servingsCooked } : {}),
     };
 
-    await prisma.$transaction(async (tx) => {
+    const pantry = await prisma.$transaction(async (tx) => {
       await tx.cookingLog.create({
         data: {
-          userId: DEMO_USER_ID,
+          userId,
           recipeId,
           actualPrepTime: actualPrepTime ?? null,
           actualCookTime: actualCookTime ?? null,
@@ -119,7 +123,7 @@ export async function POST(request: NextRequest) {
 
       await tx.preferenceSignal.create({
         data: {
-          userId: DEMO_USER_ID,
+          userId,
           signalType: "COOKED",
           entityType: "RECIPE",
           entityId: recipeId,
@@ -131,12 +135,12 @@ export async function POST(request: NextRequest) {
         await tx.techniqueLog.upsert({
           where: {
             userId_technique: {
-              userId: DEMO_USER_ID,
+              userId,
               technique,
             },
           },
           create: {
-            userId: DEMO_USER_ID,
+            userId,
             technique,
             cuisine: recipe.cuisine,
             timesPerformed: 1,
@@ -153,7 +157,7 @@ export async function POST(request: NextRequest) {
       if (rating != null) {
         await tx.recipeRating.create({
           data: {
-            userId: DEMO_USER_ID,
+            userId,
             recipeId,
             rating,
             notes: notes ?? null,
@@ -170,11 +174,20 @@ export async function POST(request: NextRequest) {
           data: { avgRating: agg._avg.rating ?? rating },
         });
       }
+
+      return deductPantryForCookedRecipe(tx, {
+        userId,
+        recipeId,
+        servingsCooked,
+      });
     });
 
-    await updateFlavorProfileFromSignals(DEMO_USER_ID);
+    await updateFlavorProfileFromSignals(userId);
 
-    return NextResponse.json({ ok: true, recipeId }, { status: 201 });
+    return NextResponse.json(
+      { ok: true, recipeId, pantry },
+      { status: 201 },
+    );
   } catch {
     return NextResponse.json(
       { error: "Failed to log cooking session" },

@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { IngredientCategory } from "@prisma/client";
 import { z } from "zod";
 import { addDays } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { scheduleNewIngredientRecipeGeneration } from "@/lib/engines/schedule-new-ingredient-recipes";
-
-const DEMO_USER_ID = "demo-user";
+import { enrichNewIngredients } from "@/lib/engines/ingredient-enricher";
+import { curateCookbook } from "@/lib/engines/cookbook-curator";
+import { requireApiUserId } from "@/lib/auth/api-user";
+import { resolveIngredientForWrite } from "@/lib/engines/ingredient-resolve";
 
 const validCategories = new Set(
   Object.values(IngredientCategory) as string[],
@@ -36,6 +37,10 @@ const bulkSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = bulkSchema.safeParse(body);
     if (!parsed.success) {
@@ -51,30 +56,25 @@ export async function POST(request: NextRequest) {
     let updated = 0;
     let ingredientsCreated = 0;
     const newPantryIngredientIds: string[] = [];
+    const newCatalogIngredientIds: string[] = [];
 
     for (const row of parsed.data.items) {
       let ingredientId = row.ingredientId;
 
       if (!ingredientId && row.newName) {
-        const existing = await prisma.ingredient.findFirst({
-          where: { name: { equals: row.newName, mode: "insensitive" } },
+        const cat = row.category && validCategories.has(row.category)
+          ? (row.category as IngredientCategory)
+          : IngredientCategory.OTHER;
+        const resolved = await resolveIngredientForWrite(prisma, row.newName, {
+          allowCreateAdHoc: true,
+          defaultCategory: cat,
+          defaultUnit: row.unit,
+          defaultStorage: row.location ?? "PANTRY",
         });
-        if (existing) {
-          ingredientId = existing.id;
-        } else {
-          const cat = row.category && validCategories.has(row.category)
-            ? (row.category as IngredientCategory)
-            : IngredientCategory.OTHER;
-          const createdIng = await prisma.ingredient.create({
-            data: {
-              name: row.newName.trim(),
-              category: cat,
-              defaultUnit: row.unit,
-              storageType: row.location ?? "PANTRY",
-            },
-          });
-          ingredientId = createdIng.id;
+        ingredientId = resolved.ingredientId;
+        if (resolved.created) {
           ingredientsCreated++;
+          newCatalogIngredientIds.push(resolved.ingredientId);
         }
       }
 
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         "PANTRY") as "FRIDGE" | "FREEZER" | "PANTRY" | "COUNTER";
 
       const existingInv = await prisma.inventory.findFirst({
-        where: { userId: DEMO_USER_ID, ingredientId },
+        where: { userId, ingredientId },
       });
 
       if (existingInv) {
@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
       } else {
         await prisma.inventory.create({
           data: {
-            userId: DEMO_USER_ID,
+            userId,
             ingredientId,
             quantity: row.quantity,
             unit: row.unit,
@@ -130,7 +130,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    scheduleNewIngredientRecipeGeneration(DEMO_USER_ID, newPantryIngredientIds);
+    // Background: enrich new-to-catalog ingredients, then curate cookbook
+    after(async () => {
+      try {
+        if (newCatalogIngredientIds.length > 0) {
+          await enrichNewIngredients(newCatalogIngredientIds);
+        }
+        if (newPantryIngredientIds.length > 0) {
+          await curateCookbook(userId, {
+            newIngredientIds: newPantryIngredientIds,
+          });
+        }
+      } catch {
+        // Fire-and-forget; failures visible in GenerationJob / logs
+      }
+    });
 
     return NextResponse.json({
       created,

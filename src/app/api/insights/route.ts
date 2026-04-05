@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireApiUserId } from "@/lib/auth/api-user";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 import type { Cuisine, RecipeSource } from "@prisma/client";
 import {
   startOfMonth,
@@ -12,8 +14,6 @@ import {
   differenceInCalendarDays,
   min as dateMin,
 } from "date-fns";
-
-const USER_ID = "demo-user";
 
 const AI_BATCH: RecipeSource = "AI_BATCH";
 const AI_SINGLE_SOURCES: RecipeSource[] = [
@@ -44,6 +44,10 @@ function formatTechnique(t: string): string {
 
 export async function GET() {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const userId = auth.userId;
+
     const now = new Date();
     const monthStart = startOfMonth(now);
     const lookback = subMonths(now, 18);
@@ -71,67 +75,67 @@ export async function GET() {
     ] = await Promise.all([
       prisma.recipe.groupBy({
         by: ["cuisine"],
-        where: { status: "active" },
+        where: { status: "active", AND: [recipeVisibilityClause(userId)] },
         _count: { _all: true },
       }),
       prisma.recipe.groupBy({
         by: ["source"],
-        where: { status: "active" },
+        where: { status: "active", AND: [recipeVisibilityClause(userId)] },
         _count: { _all: true },
       }),
       prisma.recipe.findMany({
-        where: { status: "active" },
+        where: { status: "active", AND: [recipeVisibilityClause(userId)] },
         select: { createdAt: true, source: true },
         orderBy: { createdAt: "asc" },
       }),
-      prisma.cookingLog.count({ where: { userId: USER_ID } }),
+      prisma.cookingLog.count({ where: { userId: userId } }),
       prisma.cookingLog.count({
-        where: { userId: USER_ID, cookedAt: { gte: monthStart } },
+        where: { userId: userId, cookedAt: { gte: monthStart } },
       }),
       prisma.recipeRating.aggregate({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         _avg: { rating: true },
       }),
       prisma.cookingLog.groupBy({
         by: ["recipeId"],
-        where: { userId: USER_ID },
+        where: { userId: userId },
         _count: { id: true },
         orderBy: { _count: { id: "desc" } },
         take: 10,
       }),
       prisma.cookingLog.findMany({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         select: { cookedAt: true },
       }),
       prisma.purchaseHistory.aggregate({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         _sum: { cost: true },
       }),
       prisma.purchaseHistory.aggregate({
-        where: { userId: USER_ID, purchasedAt: { gte: monthStart } },
+        where: { userId: userId, purchasedAt: { gte: monthStart } },
         _sum: { cost: true },
       }),
       prisma.purchaseHistory.findMany({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         select: { cost: true, ingredientId: true, purchasedAt: true },
       }),
       prisma.purchaseHistory.groupBy({
         by: ["ingredientId"],
-        where: { userId: USER_ID },
+        where: { userId: userId },
         _sum: { cost: true },
         orderBy: { _sum: { cost: "desc" } },
         take: 10,
       }),
       prisma.inventory.count({
         where: {
-          userId: USER_ID,
+          userId: userId,
           expiryDate: { lt: now },
           quantity: { gt: 0 },
         },
       }),
       prisma.inventory.findMany({
         where: {
-          userId: USER_ID,
+          userId: userId,
           quantity: { gt: 0 },
           expiryDate: { gte: now },
         },
@@ -142,9 +146,9 @@ export async function GET() {
         orderBy: { expiryDate: "asc" },
         take: 12,
       }),
-      prisma.purchaseHistory.count({ where: { userId: USER_ID } }),
+      prisma.purchaseHistory.count({ where: { userId: userId } }),
       prisma.generationJob.aggregate({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         _count: { _all: true },
         _sum: {
           recipesGenerated: true,
@@ -153,7 +157,7 @@ export async function GET() {
         },
       }),
       prisma.generationJob.findMany({
-        where: { userId: USER_ID, status: "COMPLETED" },
+        where: { userId: userId, status: "COMPLETED" },
         select: {
           createdAt: true,
           completedAt: true,
@@ -163,11 +167,11 @@ export async function GET() {
         orderBy: { createdAt: "asc" },
       }),
       prisma.techniqueLog.findMany({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         select: { technique: true, timesPerformed: true },
       }),
       prisma.cookingLog.findMany({
-        where: { userId: USER_ID },
+        where: { userId: userId },
         select: { recipe: { select: { cuisine: true, source: true } } },
       }),
     ]);
@@ -230,7 +234,10 @@ export async function GET() {
 
     const topRecipeIds = cookGroups.map((g) => g.recipeId);
     const topRecipeMeta = await prisma.recipe.findMany({
-      where: { id: { in: topRecipeIds } },
+      where: {
+        id: { in: topRecipeIds },
+        AND: [recipeVisibilityClause(userId)],
+      },
       select: { id: true, title: true, avgRating: true },
     });
     const metaById = new Map(topRecipeMeta.map((r) => [r.id, r]));

@@ -113,20 +113,32 @@ export interface RecipeDetail {
 export interface MatchScore {
   recipeId: string;
   title: string;
+  description: string;
   cuisine: string;
   difficulty: number;
+  techniques: string[];
+  prepTime: number;
+  cookTime: number;
+  servings: number;
+  tags: string[];
+  source: string;
+  totalCooks: number;
+  avgRating: number | null;
+  createdAt: string;
   pantryOverlap: number;
   flavorMatch: number;
   cuisineAffinity: number;
   techniqueComfort: number;
   expiryBonus: number;
   total: number;
+  _count: { ingredients: number; ratings: number };
 }
 
 export interface MatchFilters {
   cuisine?: string;
   maxDifficulty?: number;
   limit?: number;
+  minPantryOverlap?: number;
 }
 
 export function useRecipes(filters?: RecipeFilters) {
@@ -167,6 +179,7 @@ export function useRecipeMatches(filters?: MatchFilters) {
       if (filters?.cuisine) params.set("cuisine", filters.cuisine);
       if (filters?.maxDifficulty) params.set("maxDifficulty", String(filters.maxDifficulty));
       if (filters?.limit) params.set("limit", String(filters.limit));
+      if (filters?.minPantryOverlap != null) params.set("minPantryOverlap", String(filters.minPantryOverlap));
       const res = await fetch(`/api/recipes/match?${params}`);
       if (!res.ok) throw new Error("Failed to match recipes");
       return res.json();

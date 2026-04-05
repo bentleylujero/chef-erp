@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildTopologyData } from "@/lib/engines/topology-builder";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export const dynamic = "force-dynamic";
-
-const DEMO_USER_ID = "demo-user";
 
 const NO_STORE = {
   "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -11,6 +10,10 @@ const NO_STORE = {
 } as const;
 
 export async function GET(request: NextRequest) {
+  const auth = await requireApiUserId();
+  if ("response" in auth) return auth.response;
+  const { userId } = auth;
+
   const { searchParams } = request.nextUrl;
   const cuisine = searchParams.get("cuisine") ?? undefined;
   const pantryOnly = searchParams.get("pantryOnly") === "true";
@@ -19,7 +22,7 @@ export async function GET(request: NextRequest) {
   const mode = searchParams.get("mode") ?? undefined;
 
   try {
-    const data = await buildTopologyData(DEMO_USER_ID, {
+    const data = await buildTopologyData(userId, {
       cuisine,
       pantryOnly: pantryOnly || undefined,
       minWeight,

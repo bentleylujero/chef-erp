@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { env } from "@/lib/env";
 
 export {
   OPENAI_MODEL_CHAT,
@@ -8,5 +9,5 @@ export {
 } from "@/lib/openai-models";
 
 export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: env.OPENAI_API_KEY,
 });

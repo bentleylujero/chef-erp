@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RecipeDetail, RecipeInstruction } from "@/hooks/use-recipes";
+import { normalizeRecipeInstructions } from "@/lib/recipe-instructions";
 import { formatQuantity } from "@/lib/utils/units";
 
 export type CookingPhase = "mise" | "cooking" | "complete";
@@ -44,15 +45,15 @@ function buildMiseItems(recipe: RecipeDetail): MiseItem[] {
     });
   }
 
-  const steps = [...recipe.instructions].sort((a, b) => a.step - b.step);
-  for (const step of steps) {
+  const steps = normalizeRecipeInstructions(recipe.instructions);
+  steps.forEach((step, i) => {
     items.push({
-      id: `step-${step.step}`,
+      id: `instruction-step-${i}`,
       source: "instruction",
       label: `Step ${step.step}`,
-      detail: step.text,
+      detail: step.text?.trim() || undefined,
     });
-  }
+  });
 
   return items;
 }
@@ -116,7 +117,7 @@ export function useCookingMode(recipe: RecipeDetail): UseCookingModeResult {
   const miseItems = useMemo(() => buildMiseItems(recipe), [recipe]);
 
   const sortedInstructions = useMemo(
-    () => [...recipe.instructions].sort((a, b) => a.step - b.step),
+    () => normalizeRecipeInstructions(recipe.instructions),
     [recipe.instructions],
   );
 

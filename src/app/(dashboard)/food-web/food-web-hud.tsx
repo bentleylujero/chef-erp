@@ -77,7 +77,7 @@ function HudStat({
       }}
     >
       <HudCorners />
-      <div style={{ color: hexToRgba(HUD.cyan, 0.45) }}>{icon}</div>
+      <div style={{ color: hexToRgba(HUD.accent, 0.5) }}>{icon}</div>
       <div>
         <div
           className={cn(
@@ -224,13 +224,13 @@ export function FiltersPanel({
             onClick={() => setPanelOpen(true)}
             className={cn(
               MONO,
-              "flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors hover:text-[#94a3b8]",
+              "flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors hover:text-[#a89b8c]",
             )}
             style={{ color: HUD.textMuted }}
           >
             <Network
               className="size-3 shrink-0"
-              style={{ color: hexToRgba(HUD.cyan, 0.45) }}
+              style={{ color: hexToRgba(HUD.accent, 0.5) }}
             />
             Filters
           </button>
@@ -257,7 +257,7 @@ export function FiltersPanel({
             onClick={() => setPanelOpen(false)}
             className={cn(
               MONO,
-              "flex size-6 shrink-0 items-center justify-center rounded-md border border-transparent text-[#475569] transition-colors hover:border-[#1a1a2e] hover:bg-[#1a1a2e]/40 hover:text-[#94a3b8]",
+              "flex size-6 shrink-0 items-center justify-center rounded-md border border-transparent text-[#6b5f53] transition-colors hover:border-[#2a2420] hover:bg-[#2a2420]/40 hover:text-[#a89b8c]",
             )}
             aria-label="Close filters"
           >
@@ -275,7 +275,7 @@ export function FiltersPanel({
             <SelectTrigger
               className={cn(
                 MONO,
-                "h-7 w-[160px] border-[#1a1a2e] bg-transparent text-[10px]",
+                "h-7 w-[160px] border-[#2a2420] bg-transparent text-[10px]",
               )}
               style={{ color: HUD.textMuted }}
             >
@@ -294,7 +294,7 @@ export function FiltersPanel({
           <div
             className={cn(
               MONO,
-              "flex h-7 w-[160px] items-center rounded-lg border border-[#1a1a2e] bg-transparent px-2.5 text-[10px]",
+              "flex h-7 w-[160px] items-center rounded-lg border border-[#2a2420] bg-transparent px-2.5 text-[10px]",
             )}
             style={{ color: HUD.textMuted }}
           >
@@ -309,8 +309,8 @@ export function FiltersPanel({
             MONO,
             "flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
             pantryOnly
-              ? "border-[#ffab00]/40 bg-[#ffab00]/10 text-[#ffab00]"
-              : "border-[#1a1a2e] text-[#475569] hover:text-[#94a3b8]",
+              ? "border-[#e8a849]/40 bg-[#e8a849]/10 text-[#e8a849]"
+              : "border-[#2a2420] text-[#6b5f53] hover:text-[#a89b8c]",
           )}
         >
           {pantryOnly ? (
@@ -328,8 +328,8 @@ export function FiltersPanel({
             MONO,
             "flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
             showUnlinked
-              ? "border-[#00e5ff]/35 bg-[#00e5ff]/8 text-[#7dd3fc]"
-              : "border-[#1a1a2e] text-[#475569] hover:text-[#94a3b8]",
+              ? "border-[#d4a574]/35 bg-[#d4a574]/8 text-[#d4a574]"
+              : "border-[#2a2420] text-[#6b5f53] hover:text-[#a89b8c]",
           )}
           title="Off: hide pantry items with no synergy edges. On: show every stocked item."
         >
@@ -345,8 +345,8 @@ export function FiltersPanel({
             MONO,
             "flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
             discoverMode
-              ? "border-[#0eca78]/40 bg-[#0eca78]/10 text-[#0eca78]"
-              : "border-[#1a1a2e] text-[#475569] hover:text-[#94a3b8]",
+              ? "border-[#5cb87a]/40 bg-[#5cb87a]/10 text-[#5cb87a]"
+              : "border-[#2a2420] text-[#6b5f53] hover:text-[#a89b8c]",
           )}
           title="Highlight unexplored ingredient combinations with high flavor affinity"
         >
@@ -368,18 +368,18 @@ export function FiltersPanel({
             step={1}
             value={minWeight}
             onChange={(e) => setMinWeight(Number(e.target.value))}
-            className="h-0.5 flex-1 cursor-pointer appearance-none rounded-full bg-[#1a1a2e] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#00e5ff] [&::-webkit-slider-thumb]:shadow-[0_0_6px_rgba(0,229,255,0.6)]"
+            className="h-0.5 flex-1 cursor-pointer appearance-none rounded-full bg-[#2a2420] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#d4a574] [&::-webkit-slider-thumb]:shadow-[0_0_6px_rgba(212,165,116,0.5)]"
           />
           <span
             className={cn(MONO, "w-3 text-center text-[10px] font-bold")}
-            style={{ color: HUD.cyan }}
+            style={{ color: HUD.accent }}
           >
             {minWeight}
           </span>
         </div>
 
         {/* ── Pantry Bridge ── */}
-        <div className="mt-1 space-y-2 border-t border-[#1a1a2e]/60 pt-2.5">
+        <div className="mt-1 space-y-2 border-t border-[#2a2420]/60 pt-2.5">
           <div
             className={cn(
               MONO,
@@ -447,8 +447,8 @@ export function FiltersPanel({
                   MONO,
                   "flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
                   bridgeStatus.canGenerate && !bridgeGenerate.isPending
-                    ? "border-[#00e5ff]/35 bg-[#00e5ff]/10 text-[#7dd3fc] hover:bg-[#00e5ff]/15"
-                    : "cursor-not-allowed border-[#1a1a2e] text-[#475569] opacity-60",
+                    ? "border-[#d4a574]/35 bg-[#d4a574]/10 text-[#d4a574] hover:bg-[#d4a574]/15"
+                    : "cursor-not-allowed border-[#2a2420] text-[#6b5f53] opacity-60",
                 )}
               >
                 {bridgeGenerate.isPending ? (
@@ -463,7 +463,7 @@ export function FiltersPanel({
               <div
                 className={cn(
                   MONO,
-                  "mt-2.5 space-y-2 border-t border-[#1a1a2e]/60 pt-2.5",
+                  "mt-2.5 space-y-2 border-t border-[#2a2420]/60 pt-2.5",
                 )}
               >
                 <div
@@ -524,8 +524,8 @@ export function FiltersPanel({
                         MONO,
                         "flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-all",
                         meshStatus.canGenerate && !meshGenerate.isPending
-                          ? "border-[#ffab00]/35 bg-[#ffab00]/10 text-[#fcd34d] hover:bg-[#ffab00]/15"
-                          : "cursor-not-allowed border-[#1a1a2e] text-[#475569] opacity-60",
+                          ? "border-[#e8a849]/35 bg-[#e8a849]/10 text-[#e8a849] hover:bg-[#e8a849]/15"
+                          : "cursor-not-allowed border-[#2a2420] text-[#6b5f53] opacity-60",
                       )}
                     >
                       {meshGenerate.isPending ? (
@@ -621,7 +621,7 @@ export function SearchBar({ nodes, onSelect, monoClass }: SearchBarProps) {
         <div className="flex items-center gap-2 px-3 py-1.5">
           <Search
             className="h-3 w-3 shrink-0"
-            style={{ color: hexToRgba(HUD.cyan, 0.45) }}
+            style={{ color: hexToRgba(HUD.accent, 0.5) }}
           />
           <input
             ref={inputRef}
@@ -635,7 +635,7 @@ export function SearchBar({ nodes, onSelect, monoClass }: SearchBarProps) {
             placeholder="Search ingredients ( / )"
             className={cn(
               MONO,
-              "w-48 bg-transparent text-[10px] text-[#e2e8f0] placeholder:text-[#334155] focus:outline-none",
+              "w-48 bg-transparent text-[10px] text-[#ede6dc] placeholder:text-[#3d362e] focus:outline-none",
             )}
           />
         </div>
@@ -657,7 +657,7 @@ export function SearchBar({ nodes, onSelect, monoClass }: SearchBarProps) {
                   type="button"
                   className={cn(
                     MONO,
-                    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[10px] transition-colors hover:bg-[#1a1a2e]/50",
+                    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[10px] transition-colors hover:bg-[#2a2420]/50",
                   )}
                   style={{ color: HUD.textMuted }}
                   onClick={() => handleSelect(item)}
@@ -737,13 +737,13 @@ export function Legend({
             onClick={() => setLegendOpen(true)}
             className={cn(
               MONO,
-              "flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors hover:text-[#94a3b8]",
+              "flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors hover:text-[#a89b8c]",
             )}
             style={{ color: HUD.textMuted }}
           >
             <ListTree
               className="size-3 shrink-0"
-              style={{ color: hexToRgba(HUD.cyan, 0.45) }}
+              style={{ color: hexToRgba(HUD.accent, 0.5) }}
             />
             Legend
           </button>
@@ -777,7 +777,7 @@ export function Legend({
             onClick={() => setLegendOpen(false)}
             className={cn(
               MONO,
-              "flex size-6 shrink-0 items-center justify-center rounded-md border border-transparent text-[#475569] transition-colors hover:border-[#1a1a2e] hover:bg-[#1a1a2e]/40 hover:text-[#94a3b8]",
+              "flex size-6 shrink-0 items-center justify-center rounded-md border border-transparent text-[#6b5f53] transition-colors hover:border-[#2a2420] hover:bg-[#2a2420]/40 hover:text-[#a89b8c]",
             )}
             aria-label="Close legend"
           >
@@ -810,7 +810,7 @@ export function Legend({
                   onDoubleClick={() => onHighlightCategory(groupCats[0])}
                   className={cn(
                     MONO,
-                    "flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[#1a1a2e]/30",
+                    "flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[#2a2420]/30",
                   )}
                 >
                   <ChevronRight
@@ -851,7 +851,7 @@ export function Legend({
                         <button
                           key={cat}
                           type="button"
-                          className="flex w-full items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-[#1a1a2e]/30"
+                          className="flex w-full items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-[#2a2420]/30"
                           onClick={() => onHighlightCategory(cat)}
                         >
                           <span
@@ -886,7 +886,7 @@ export function Legend({
           })}
 
           {/* Legend footer */}
-          <div className="space-y-1 border-t border-[#1a1a2e]/50 pt-1.5">
+          <div className="space-y-1 border-t border-[#2a2420]/50 pt-1.5">
             <div className="flex items-center gap-2">
               <span
                 className={cn(MONO, "text-[8px] uppercase tracking-wider leading-tight")}
@@ -967,8 +967,8 @@ export function ModeSelector({
               MONO,
               "rounded-md px-2.5 py-1 text-[9px] font-medium uppercase tracking-wider transition-all",
               graphMode === m.value
-                ? "bg-[#00e5ff]/12 text-[#7dd3fc]"
-                : "text-[#475569] hover:text-[#94a3b8]",
+                ? "bg-[#d4a574]/12 text-[#d4a574]"
+                : "text-[#6b5f53] hover:text-[#a89b8c]",
             )}
           >
             {m.label}
@@ -995,7 +995,7 @@ export function TitleHud({ displayClass, monoClass }: TitleHudProps) {
         <div
           className="h-px w-10"
           style={{
-            background: `linear-gradient(90deg, transparent, ${HUD.cyanDim})`,
+            background: `linear-gradient(90deg, transparent, ${HUD.accentDim})`,
           }}
         />
         <h1
@@ -1003,14 +1003,14 @@ export function TitleHud({ displayClass, monoClass }: TitleHudProps) {
             displayClass,
             "text-xs font-semibold uppercase tracking-[0.3em]",
           )}
-          style={{ color: "#c8d6e5" }}
+          style={{ color: "#d8cfc4" }}
         >
           Food Web
         </h1>
         <div
           className="h-px w-10"
           style={{
-            background: `linear-gradient(270deg, transparent, ${HUD.cyanDim})`,
+            background: `linear-gradient(270deg, transparent, ${HUD.accentDim})`,
           }}
         />
       </div>

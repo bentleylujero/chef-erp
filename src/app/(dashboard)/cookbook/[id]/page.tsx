@@ -16,8 +16,10 @@ import {
   ShoppingCart,
   Check,
   Info,
+  Maximize2,
 } from "lucide-react";
-import { useRecipeDetail } from "@/hooks/use-recipes";
+import { useRecipeDetail, type RecipeInstruction } from "@/hooks/use-recipes";
+import { normalizeRecipeInstructions } from "@/lib/recipe-instructions";
 import { useInventory } from "@/hooks/use-inventory";
 import { scaleRecipe } from "@/lib/engines/recipe-scaler";
 import { formatQuantity } from "@/lib/utils/units";
@@ -31,9 +33,107 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+
+function RecipeInstructionSteps({
+  instructions,
+  size = "default",
+}: {
+  instructions: RecipeInstruction[];
+  size?: "default" | "focus";
+}) {
+  const isFocus = size === "focus";
+
+  return (
+    <ol className="list-none space-y-0 divide-y divide-border/60 pl-0">
+      {instructions.map((inst, i) => (
+        <li
+          key={`instr-${inst.step}-${i}`}
+          className={cn(
+            "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-2 py-5 first:pt-0 last:pb-0",
+            isFocus && "gap-x-5 gap-y-3 py-7 md:gap-x-6 md:py-8",
+          )}
+        >
+          <span
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/12 font-semibold tabular-nums text-primary ring-1 ring-primary/15 md:h-10 md:w-10",
+              isFocus &&
+                "h-11 w-11 text-base md:h-14 md:w-14 md:text-lg",
+            )}
+            aria-hidden
+          >
+            {inst.step}
+          </span>
+          <div className="min-w-0 w-full max-w-full space-y-3">
+            <p
+              className={cn(
+                "w-full max-w-full whitespace-normal text-pretty text-foreground [overflow-wrap:anywhere]",
+                isFocus
+                  ? "text-lg leading-[1.65] md:text-xl md:leading-relaxed"
+                  : "text-base leading-[1.6] md:text-[1.0625rem]",
+              )}
+            >
+              {inst.text?.trim() ? (
+                inst.text
+              ) : (
+                <span className="italic text-muted-foreground">
+                  No description for this step.
+                </span>
+              )}
+            </p>
+            {(inst.technique || inst.timing) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {inst.technique && (
+                  <Link
+                    href={`/profile/techniques?focus=${encodeURIComponent(inst.technique)}`}
+                    className="inline-flex max-w-full"
+                  >
+                    <Badge
+                      variant="outline"
+                      className="h-auto max-w-full whitespace-normal py-1.5 text-xs font-normal leading-snug hover:bg-muted"
+                    >
+                      {formatTechnique(inst.technique)}
+                    </Badge>
+                  </Link>
+                )}
+                {inst.timing && (
+                  <Badge
+                    variant="secondary"
+                    className="h-auto max-w-full whitespace-normal py-1.5 text-xs leading-snug"
+                  >
+                    <Clock className="mr-1.5 size-3.5 shrink-0" />
+                    {inst.timing}
+                  </Badge>
+                )}
+              </div>
+            )}
+            {inst.notes && (
+              <p
+                className={cn(
+                  "rounded-lg border border-border/60 bg-muted/40 px-3 py-2.5 text-pretty text-muted-foreground",
+                  isFocus
+                    ? "text-base leading-relaxed md:text-[1.0625rem]"
+                    : "text-sm leading-relaxed",
+                )}
+              >
+                {inst.notes}
+              </p>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 function DetailSkeleton() {
   return (
@@ -50,9 +150,9 @@ function DetailSkeleton() {
         <Skeleton className="h-5 w-20" />
         <Skeleton className="h-5 w-20" />
       </div>
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
         <Skeleton className="h-80 rounded-xl" />
-        <Skeleton className="h-80 rounded-xl" />
+        <Skeleton className="min-h-[20rem] rounded-xl" />
       </div>
     </div>
   );
@@ -102,6 +202,7 @@ export default function RecipeDetailPage({
   const { data: recipe, isLoading, error } = useRecipeDetail(id);
   const { data: inventory } = useInventory();
   const [targetServings, setTargetServings] = useState<number | null>(null);
+  const [instructionsFocusOpen, setInstructionsFocusOpen] = useState(false);
 
   const servings = targetServings ?? recipe?.servings ?? 4;
 
@@ -138,6 +239,11 @@ export default function RecipeDetailPage({
       .filter(([, v]) => typeof v === "number" && v > 0)
       .sort(([, a], [, b]) => b - a);
   }, [recipe]);
+
+  const instructions = useMemo(
+    () => normalizeRecipeInstructions(recipe?.instructions),
+    [recipe?.instructions],
+  );
 
   if (isLoading) {
     return (
@@ -178,13 +284,6 @@ export default function RecipeDetailPage({
   const cuisineStyle = CUISINE_STYLES[recipe.cuisine] ?? CUISINE_STYLES.OTHER;
   const sourceLabel = SOURCE_LABELS[recipe.source] ?? recipe.source;
   const totalTime = recipe.prepTime + recipe.cookTime;
-  const instructions = (recipe.instructions ?? []) as Array<{
-    step: number;
-    technique?: string;
-    timing?: string;
-    notes?: string;
-    text: string;
-  }>;
 
   return (
     <div className="min-w-0 max-w-full space-y-6">
@@ -280,10 +379,10 @@ export default function RecipeDetailPage({
         </div>
       </div>
 
-      {/* Two-column layout — minmax(0,…) + min-w-0 prevents grid track collapse */}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+      {/* Ingredients (fixed-ish column) + instructions (uses remaining width) */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:items-start">
         {/* Ingredients */}
-        <Card className="min-w-0">
+        <Card className="min-w-0 lg:max-w-md lg:justify-self-start">
           <CardHeader className="border-b pb-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4" />
@@ -353,68 +452,75 @@ export default function RecipeDetailPage({
         </Card>
 
         {/* Instructions */}
-        <Card className="min-w-0">
-          <CardHeader className="border-b pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <UtensilsCrossed className="size-4" />
-              Instructions
-              <Badge variant="secondary" className="ml-auto text-[10px]">
-                {instructions.length} steps
-              </Badge>
-            </CardTitle>
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="space-y-3 border-b pb-3">
+            <div className="flex flex-wrap items-center gap-2 gap-y-2">
+              <CardTitle className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold">
+                <UtensilsCrossed className="size-4 shrink-0" />
+                <span className="truncate">Instructions</span>
+              </CardTitle>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Badge variant="secondary" className="text-[10px]">
+                  {instructions.length} steps
+                </Badge>
+                {instructions.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setInstructionsFocusOpen(true)}
+                  >
+                    <Maximize2 className="size-3.5" />
+                    Expand
+                  </Button>
+                )}
+              </div>
+            </div>
           </CardHeader>
-          <CardContent className="min-w-0 pt-3">
-            <ol className="list-none space-y-5 pl-0">
-              {instructions.map((inst, i) => (
-                <li
-                  key={`step-${inst.step ?? i}-${i}`}
-                  className="flex min-w-0 gap-3"
-                >
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                    {inst.step ?? i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <p className="text-base leading-relaxed break-words text-foreground">
-                      {inst.text}
-                    </p>
-                    {(inst.technique || inst.timing) && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {inst.technique && (
-                          <Link
-                            href={`/profile/techniques?focus=${encodeURIComponent(inst.technique)}`}
-                            className="inline-flex"
-                          >
-                            <Badge
-                              variant="outline"
-                              className="h-auto max-w-full whitespace-normal py-1 text-xs font-normal hover:bg-muted"
-                            >
-                              {formatTechnique(inst.technique)}
-                            </Badge>
-                          </Link>
-                        )}
-                        {inst.timing && (
-                          <Badge
-                            variant="secondary"
-                            className="h-auto max-w-full whitespace-normal py-1 text-xs"
-                          >
-                            <Clock className="mr-1 size-3 shrink-0" />
-                            {inst.timing}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
-                    {inst.notes && (
-                      <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-sm leading-relaxed text-muted-foreground break-words">
-                        {inst.notes}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ol>
+          <CardContent className="min-w-0 px-4 pt-2 pb-4 sm:px-6 sm:pt-4 sm:pb-6">
+            {instructions.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No steps yet for this recipe.
+              </p>
+            ) : (
+              <RecipeInstructionSteps instructions={instructions} />
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={instructionsFocusOpen}
+        onOpenChange={setInstructionsFocusOpen}
+      >
+        <DialogContent
+          showCloseButton
+          className={cn(
+            "!flex h-[min(100dvh-1rem,56rem)] w-[calc(100vw-1rem)] max-w-none !flex-col gap-0 overflow-hidden rounded-xl border border-border p-0 shadow-xl",
+            "top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2",
+            "sm:h-[min(100dvh-2rem,52rem)] sm:max-w-none sm:w-[min(42rem,calc(100vw-2rem))]",
+            "md:w-[min(52rem,calc(100vw-2rem))]",
+          )}
+        >
+          <DialogHeader className="shrink-0 space-y-1 border-b border-border px-5 py-4 pr-14 text-left">
+            <DialogTitle className="pr-2 text-lg font-semibold leading-snug">
+              {recipe.title}
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              Step-by-step — scroll to read. Press Esc or close when finished.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-5 py-4 sm:px-7 sm:py-6">
+            {instructions.length > 0 && (
+              <RecipeInstructionSteps
+                instructions={instructions}
+                size="focus"
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Flavor profile */}
       {flavorEntries.length > 0 && (

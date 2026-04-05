@@ -438,57 +438,32 @@ export function paintLink(
   ctx.restore();
 
   // ─────────────────────────────────────────────────
-  // Transfer particles — the advanced animation layer
+  // Transfer particles — lightweight dots, no gradients
   // ─────────────────────────────────────────────────
 
-  // Skip particles for very dimmed links
+  // Skip particles for dimmed or synthetic links
   if (plctx.highlightSet && !isHighlighted && !isHovered) return;
-  // Skip synthetic links
   if (synthetic) return;
 
   ctx.save();
 
-  // Number of particles scales with weight (1-4 particles)
-  const particleCount = Math.min(4, 1 + Math.floor(wNorm * 3));
-
-  // Speed: heavier links = faster transfer (full cycle in 2-5 seconds)
-  const cycleDuration = 5000 - wNorm * 3000; // ms per cycle
+  // Fewer particles, simpler rendering — 1 to 3 max
+  const particleCount = Math.min(3, 1 + Math.floor(wNorm * 2));
+  const cycleDuration = 5000 - wNorm * 3000;
   const speed = 1 / cycleDuration;
-
-  // Particle size
-  const pRadius = isHovered ? 2.2 : isHighlighted ? 1.8 : 1.2;
+  const pRadius = isHovered ? 1.8 : isHighlighted ? 1.4 : 1.0;
 
   for (let i = 0; i < particleCount; i++) {
-    // Each particle has a stable phase offset from the seed
     const phaseOffset = ((seed + i * 2654435761) % 1000) / 1000;
-    // Position along curve (0..1), wrapping
     const rawT = ((time * speed) + phaseOffset) % 1;
-
-    // Ease: particles accelerate out of nodes and slow into them (sine curve)
     const easedT = 0.5 - 0.5 * Math.cos(rawT * Math.PI);
-
     const [px, py] = bezierPoint(s.x, s.y, cpx, cpy, t.x, t.y, easedT);
 
-    // Color: interpolate between source and target category color
     const particleColor = easedT < 0.5 ? srcColor : tgtColor;
-
-    // Fade at endpoints so particles dissolve into nodes
     const edgeFade = Math.min(1, rawT * 5, (1 - rawT) * 5);
-    // Brightness pulse — subtle sine wave per particle
-    const pulse = 0.7 + 0.3 * Math.sin(time * 0.003 + i * 1.8);
+    const alpha = edgeFade * (isHovered ? 0.85 : isHighlighted ? 0.6 : 0.35);
 
-    const alpha = edgeFade * pulse * (isHovered ? 0.9 : isHighlighted ? 0.7 : 0.45);
-
-    // Glow
-    const glow = ctx.createRadialGradient(px, py, 0, px, py, pRadius * 3);
-    glow.addColorStop(0, hexToRgba(particleColor, alpha * 0.4));
-    glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.beginPath();
-    ctx.arc(px, py, pRadius * 3, 0, Math.PI * 2);
-    ctx.fillStyle = glow;
-    ctx.fill();
-
-    // Core dot
+    // Single filled dot — no radial gradient, no glow
     ctx.beginPath();
     ctx.arc(px, py, pRadius, 0, Math.PI * 2);
     ctx.fillStyle = hexToRgba(particleColor, alpha);

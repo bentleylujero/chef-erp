@@ -31,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { invalidateQueriesAffectedByPantry } from "@/hooks/use-inventory";
 
 type CookingLogPayload = {
   recipeId: string;
@@ -489,6 +490,7 @@ export default function CookingModePage() {
     mutationFn: async (body: CookingLogPayload) => {
       const res = await fetch("/api/cooking-log", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -503,9 +505,12 @@ export default function CookingModePage() {
       return res.json();
     },
     onSuccess: async (_, variables) => {
-      await queryClient.invalidateQueries({ queryKey: ["recipe", variables.recipeId] });
-      await queryClient.invalidateQueries({ queryKey: ["recipes"] });
-      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["recipe", variables.recipeId] }),
+        queryClient.invalidateQueries({ queryKey: ["recipes"] }),
+        queryClient.invalidateQueries({ queryKey: ["profile"] }),
+      ]);
+      await invalidateQueriesAffectedByPantry(queryClient);
       router.push(`/cookbook/${variables.recipeId}`);
     },
   });

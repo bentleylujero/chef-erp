@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUnlinkedPantryIngredients } from "@/lib/engines/topology-builder";
 import {
@@ -6,10 +6,9 @@ import {
   rankPantryBridgePairs,
 } from "@/lib/engines/pantry-bridge-heuristics";
 import { checkPantryBridgeGeneration } from "@/lib/engines/generation-trigger";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export const dynamic = "force-dynamic";
-
-const DEMO_USER_ID = "demo-user";
 
 function appOrigin(): string {
   const explicit = process.env.INTERNAL_APP_URL?.replace(/\/$/, "");
@@ -20,15 +19,19 @@ function appOrigin(): string {
 
 export async function GET() {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const {
       unlinked,
       linkedCorpusPantry,
       totalPantryWithStock,
       linkedPantryCount,
-    } = await getUnlinkedPantryIngredients(DEMO_USER_ID);
+    } = await getUnlinkedPantryIngredients(userId);
 
     const attempts = await prisma.pantryBridgeAttempt.findMany({
-      where: { userId: DEMO_USER_ID },
+      where: { userId },
       select: { ingredientAId: true, ingredientBId: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: 200,
@@ -69,9 +72,13 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
-    const decision = await checkPantryBridgeGeneration(DEMO_USER_ID);
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
+    const decision = await checkPantryBridgeGeneration(userId);
     if (!decision.shouldGenerate) {
       return NextResponse.json(
         { error: decision.reason },
@@ -81,9 +88,11 @@ export async function POST() {
 
     const res = await fetch(`${appOrigin()}/api/ai/generate-batch`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: request.headers.get("cookie") ?? "",
+      },
       body: JSON.stringify({
-        userId: DEMO_USER_ID,
         trigger: decision.trigger,
         count: decision.count,
         bridgePairs: decision.context.bridgePairs,

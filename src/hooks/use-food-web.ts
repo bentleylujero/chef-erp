@@ -21,6 +21,7 @@ export function useFoodWeb(filters?: FoodWebFilters) {
       if (filters?.mode) params.set("mode", filters.mode);
       const res = await fetch(`/api/recipes/food-web?${params}`, {
         cache: "no-store",
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to fetch food web data");
       return res.json();

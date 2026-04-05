@@ -1,16 +1,19 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { BookOpen, Search, BookOpenCheck } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { BookOpen, Search, BookOpenCheck, ChefHat, RefreshCw, Loader2 } from "lucide-react";
 import {
   useRecipes,
   useRecipeMatches,
   type RecipeListItem,
 } from "@/hooks/use-recipes";
 import { RecipeCard } from "@/components/cookbook/recipe-card";
+import { CookbookMaintenanceCard } from "@/components/cookbook/cookbook-maintenance-card";
 import { formatCuisine, formatTechnique } from "@/components/cookbook/recipe-card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -135,13 +138,64 @@ function EmptyState({ message }: { message?: string }) {
 }
 
 export default function CookbookPage() {
-  const [activeTab, setActiveTab] = useState<string>("all");
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<string>("matches");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [cuisine, setCuisine] = useState("ALL");
   const [difficulty, setDifficulty] = useState("ALL");
   const [technique, setTechnique] = useState("ALL");
   const [sort, setSort] = useState("newest");
+  const [building, setBuilding] = useState(false);
+  const [buildStatus, setBuildStatus] = useState<string | null>(null);
+  const [curating, setCurating] = useState(false);
+  const [curateStatus, setCurateStatus] = useState<string | null>(null);
+
+  async function handleBuildCookbook() {
+    setBuilding(true);
+    setBuildStatus(null);
+    try {
+      const res = await fetch("/api/cookbook/build", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetRecipeCount: 300 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Build failed");
+      setBuildStatus(`Generated ${data.totalRecipesGenerated} recipes across ${data.wavesCompleted} waves`);
+      await queryClient.invalidateQueries({ queryKey: ["recipes"] });
+      await queryClient.invalidateQueries({ queryKey: ["recipe-matches"] });
+    } catch (e) {
+      setBuildStatus(e instanceof Error ? e.message : "Build failed");
+    } finally {
+      setBuilding(false);
+    }
+  }
+
+  async function handleCurate() {
+    setCurating(true);
+    setCurateStatus(null);
+    try {
+      const res = await fetch("/api/cookbook/curate", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Refresh failed");
+      setCurateStatus(data.triggered
+        ? `Triggered: ${data.triggered} — ${data.reason}`
+        : data.reason);
+      await queryClient.invalidateQueries({ queryKey: ["recipes"] });
+      await queryClient.invalidateQueries({ queryKey: ["recipe-matches"] });
+    } catch (e) {
+      setCurateStatus(e instanceof Error ? e.message : "Refresh failed");
+    } finally {
+      setCurating(false);
+    }
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -166,7 +220,8 @@ export default function CookbookPage() {
     () => ({
       ...(cuisine !== "ALL" ? { cuisine } : {}),
       ...(difficulty !== "ALL" ? { maxDifficulty: parseInt(difficulty) } : {}),
-      limit: 30,
+      minPantryOverlap: 80,
+      limit: 50,
     }),
     [cuisine, difficulty],
   );
@@ -180,19 +235,30 @@ export default function CookbookPage() {
   const total = recipesData?.total ?? 0;
 
   const matchedRecipes = useMemo(() => {
-    if (!matchData?.matches?.length || !recipes.length) return [];
-    const recipeMap = new Map(recipes.map((r) => [r.id, r]));
-    return matchData.matches
-      .map((match) => {
-        const recipe = recipeMap.get(match.recipeId);
-        if (!recipe) return null;
-        return { recipe, matchScore: Math.round(match.total) };
-      })
-      .filter(
-        (item): item is { recipe: RecipeListItem; matchScore: number } =>
-          item !== null,
-      );
-  }, [matchData, recipes]);
+    if (!matchData?.matches?.length) return [];
+    return matchData.matches.map((match) => ({
+      recipe: {
+        id: match.recipeId,
+        title: match.title,
+        description: match.description,
+        cuisine: match.cuisine,
+        difficulty: match.difficulty,
+        techniques: match.techniques,
+        prepTime: match.prepTime,
+        cookTime: match.cookTime,
+        servings: match.servings,
+        tags: match.tags,
+        source: match.source,
+        totalCooks: match.totalCooks,
+        avgRating: match.avgRating,
+        status: "active",
+        createdAt: match.createdAt,
+        _count: match._count,
+      } satisfies RecipeListItem,
+      matchScore: Math.round(match.total),
+      pantryOverlap: Math.round(match.pantryOverlap),
+    }));
+  }, [matchData]);
 
   const recentRecipes = useMemo(() => {
     return [...recipes].sort(
@@ -211,6 +277,39 @@ export default function CookbookPage() {
             Your growing recipe library, generated from your ingredients and
             cooking style.
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleBuildCookbook}
+              disabled={building || curating}
+              size="sm"
+            >
+              {building ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : (
+                <ChefHat className="mr-1.5 size-3.5" />
+              )}
+              {building ? "Building..." : "Build Cookbook"}
+            </Button>
+            <Button
+              onClick={handleCurate}
+              disabled={curating || building}
+              variant="secondary"
+              size="sm"
+            >
+              {curating ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 size-3.5" />
+              )}
+              {curating ? "Refreshing..." : "Add Recipes"}
+            </Button>
+          </div>
+          {buildStatus && (
+            <p className="mt-2 text-sm text-muted-foreground">{buildStatus}</p>
+          )}
+          {curateStatus && (
+            <p className="mt-2 text-sm text-muted-foreground">{curateStatus}</p>
+          )}
         </div>
         {total > 0 && (
           <div className="hidden shrink-0 items-center gap-3 rounded-xl bg-primary/10 px-4 py-2.5 sm:flex">
@@ -225,13 +324,22 @@ export default function CookbookPage() {
         )}
       </div>
 
+      <CookbookMaintenanceCard />
+
       {/* Tabs, Filters, Content */}
       <Tabs
-        defaultValue="all"
-        value={activeTab}
+        defaultValue="matches"
         onValueChange={(v) => setActiveTab(String(v))}
       >
         <TabsList>
+          <TabsTrigger value="matches">
+            Cookable Now
+            {matchedRecipes.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 h-4 px-1.5 text-[10px]">
+                {matchedRecipes.length}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="all">
             All Recipes
             {total > 0 && (
@@ -240,7 +348,6 @@ export default function CookbookPage() {
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="matches">Best Matches</TabsTrigger>
           <TabsTrigger value="recent">Recently Added</TabsTrigger>
         </TabsList>
 
@@ -338,19 +445,20 @@ export default function CookbookPage() {
           )}
         </TabsContent>
 
-        {/* Best Matches */}
+        {/* Cookable Now */}
         <TabsContent value="matches" className="mt-4">
-          {matchesLoading || recipesLoading ? (
+          {matchesLoading ? (
             <RecipeGridSkeleton />
           ) : matchedRecipes.length === 0 ? (
-            <EmptyState message="No matches found. Add ingredients to your pantry to get personalized recipe recommendations." />
+            <EmptyState message="No recipes match your current pantry. Build your cookbook or add more ingredients to your pantry." />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {matchedRecipes.map(({ recipe, matchScore }) => (
+              {matchedRecipes.map(({ recipe, matchScore, pantryOverlap }) => (
                 <RecipeCard
                   key={recipe.id}
                   recipe={recipe}
                   matchScore={matchScore}
+                  pantryOverlap={pantryOverlap}
                 />
               ))}
             </div>

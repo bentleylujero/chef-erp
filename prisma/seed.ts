@@ -10,6 +10,9 @@ import { pantryStaples } from "./seeds/ingredients/pantry-staples";
 import { condimentsSauces } from "./seeds/ingredients/condiments-sauces";
 import { grainsLegumes } from "./seeds/ingredients/grains-legumes";
 import { nutsSeeds } from "./seeds/ingredients/nuts-seeds";
+import { INGREDIENT_ALIAS_GROUPS } from "./seeds/ingredient-aliases";
+import { normalizeIngredientQuery } from "../src/lib/engines/ingredient-normalize";
+import { seedRecipes } from "./seeds/recipes";
 
 const adapter = new PrismaPg(process.env.DATABASE_URL!);
 const prisma = new PrismaClient({ adapter });
@@ -34,7 +37,9 @@ async function main() {
   let created = 0;
   let skipped = 0;
 
-  for (const ingredient of allIngredients) {
+  for (let i = 0; i < allIngredients.length; i++) {
+    const ingredient = allIngredients[i];
+    if (i % 50 === 0) console.log(`  Processing ingredient ${i + 1}/${allIngredients.length}...`);
     try {
       await prisma.ingredient.upsert({
         where: { name: ingredient.name },
@@ -47,6 +52,7 @@ async function main() {
           cuisineTags: ingredient.cuisineTags as any[],
           flavorTags: ingredient.flavorTags,
           description: ingredient.description,
+          catalogTier: "SYSTEM",
         },
         create: {
           name: ingredient.name,
@@ -58,6 +64,7 @@ async function main() {
           cuisineTags: ingredient.cuisineTags as any[],
           flavorTags: ingredient.flavorTags ?? {},
           description: ingredient.description ?? undefined,
+          catalogTier: "SYSTEM",
         },
       });
       created++;
@@ -71,6 +78,50 @@ async function main() {
   }
 
   console.log(`\n✅ Seeded ${created} ingredients (${skipped} duplicates skipped)`);
+
+  console.log("\n🌱 Seeding ingredient aliases...\n");
+  let aliasCount = 0;
+  for (const group of INGREDIENT_ALIAS_GROUPS) {
+    const ing = await prisma.ingredient.findUnique({
+      where: { name: group.canonicalName },
+    });
+    if (!ing) {
+      console.warn(`  Skip aliases — missing ingredient: ${group.canonicalName}`);
+      continue;
+    }
+    for (const alias of group.aliases) {
+      const aliasNormalized = normalizeIngredientQuery(alias);
+      if (!aliasNormalized) continue;
+      try {
+        await prisma.ingredientAlias.upsert({
+          where: { aliasNormalized },
+          create: {
+            ingredientId: ing.id,
+            aliasNormalized,
+            displayAlias: alias,
+            source: "SEED",
+          },
+          update: {
+            ingredientId: ing.id,
+            displayAlias: alias,
+            source: "SEED",
+          },
+        });
+        aliasCount++;
+      } catch (e: unknown) {
+        const err = e as { code?: string };
+        if (err.code === "P2002") {
+          console.warn(`  Alias conflict skipped: ${alias}`);
+        } else {
+          console.error(`  Alias failed: ${alias}`, e);
+        }
+      }
+    }
+  }
+  console.log(`\n✅ Upserted ${aliasCount} ingredient aliases`);
+
+  // Seed recipes (must run after ingredients so name→id lookup works)
+  await seedRecipes(prisma);
 }
 
 main()

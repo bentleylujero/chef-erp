@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
+import { resolveIngredientForWrite } from "@/lib/engines/ingredient-resolve";
 
 const onboardingSchema = z.object({
-  name: z.string().min(1).default("Chef"),
-  email: z.string().email().default("chef@bentley.kitchen"),
+  name: z.string().min(1),
+  email: z.string().email(),
   skillLevel: z.enum(["INTERMEDIATE", "ADVANCED", "PROFESSIONAL"]),
   kitchenEquipment: z.array(z.string()),
   dietaryRestrictions: z.array(z.string()),
@@ -33,6 +33,10 @@ const onboardingSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = onboardingSchema.safeParse(body);
 
@@ -46,9 +50,9 @@ export async function POST(request: NextRequest) {
     const data = parsed.data;
 
     const user = await prisma.user.upsert({
-      where: { id: DEMO_USER_ID },
+      where: { id: userId },
       create: {
-        id: DEMO_USER_ID,
+        id: userId,
         email: data.email,
         name: data.name,
         skillLevel: data.skillLevel,
@@ -67,9 +71,9 @@ export async function POST(request: NextRequest) {
     });
 
     await prisma.flavorProfile.upsert({
-      where: { userId: DEMO_USER_ID },
+      where: { userId },
       create: {
-        userId: DEMO_USER_ID,
+        userId,
         spiceTolerance: data.flavorProfile.spiceTolerance,
         sweetPref: data.flavorProfile.sweetPref,
         saltyPref: data.flavorProfile.saltyPref,
@@ -90,9 +94,9 @@ export async function POST(request: NextRequest) {
     });
 
     await prisma.cookingStyle.upsert({
-      where: { userId: DEMO_USER_ID },
+      where: { userId },
       create: {
-        userId: DEMO_USER_ID,
+        userId,
         primaryCuisines: data.primaryCuisines as never[],
         exploringCuisines: data.exploringCuisines as never[],
         cookingPhilosophy: data.cookingPhilosophy,
@@ -105,28 +109,20 @@ export async function POST(request: NextRequest) {
     });
 
     if (data.pantryItems.length > 0) {
-      await prisma.inventory.deleteMany({ where: { userId: DEMO_USER_ID } });
+      await prisma.inventory.deleteMany({ where: { userId } });
 
       for (const item of data.pantryItems) {
-        let ingredient = await prisma.ingredient.findFirst({
-          where: { name: { equals: item.name, mode: "insensitive" } },
+        const resolved = await resolveIngredientForWrite(prisma, item.name, {
+          allowCreateAdHoc: true,
+          defaultCategory: "OTHER",
+          defaultUnit: item.unit,
+          defaultStorage: "PANTRY",
         });
-
-        if (!ingredient) {
-          ingredient = await prisma.ingredient.create({
-            data: {
-              name: item.name,
-              category: "OTHER",
-              defaultUnit: item.unit,
-              storageType: "PANTRY",
-            },
-          });
-        }
 
         await prisma.inventory.create({
           data: {
-            userId: DEMO_USER_ID,
-            ingredientId: ingredient.id,
+            userId,
+            ingredientId: resolved.ingredientId,
             quantity: item.quantity,
             unit: item.unit,
             location: "PANTRY",

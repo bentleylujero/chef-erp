@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
-
-const DEMO_USER_ID = "demo-user";
+import { getApiUserId, requireApiUserId } from "@/lib/auth/api-user";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 
 type SortOption = "newest" | "rating" | "cooks";
 
@@ -21,30 +21,38 @@ export async function GET(request: NextRequest) {
   const technique = searchParams.get("technique");
   const source = searchParams.get("source");
   const sort = (searchParams.get("sort") ?? "newest") as SortOption;
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 100);
+  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 500);
   const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
-  const where: Prisma.RecipeWhereInput = { status: "active" };
+  const viewerId = await getApiUserId();
+  const clauses: Prisma.RecipeWhereInput[] = [
+    { status: "active" },
+    recipeVisibilityClause(viewerId),
+  ];
 
   if (search) {
-    where.OR = [
-      { title: { contains: search, mode: "insensitive" } },
-      { description: { contains: search, mode: "insensitive" } },
-      { tags: { hasSome: [search.toLowerCase()] } },
-    ];
+    clauses.push({
+      OR: [
+        { title: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+        { tags: { hasSome: [search.toLowerCase()] } },
+      ],
+    });
   }
   if (cuisine) {
-    where.cuisine = cuisine as Prisma.EnumCuisineFilter;
+    clauses.push({ cuisine: cuisine as Prisma.EnumCuisineFilter });
   }
   if (difficulty) {
-    where.difficulty = parseInt(difficulty, 10);
+    clauses.push({ difficulty: parseInt(difficulty, 10) });
   }
   if (technique) {
-    where.techniques = { has: technique as never };
+    clauses.push({ techniques: { has: technique as never } });
   }
   if (source) {
-    where.source = source as Prisma.EnumRecipeSourceFilter;
+    clauses.push({ source: source as Prisma.EnumRecipeSourceFilter });
   }
+
+  const where: Prisma.RecipeWhereInput = { AND: clauses };
 
   try {
     const [recipes, total] = await Promise.all([
@@ -123,6 +131,10 @@ const createRecipeSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = createRecipeSchema.safeParse(body);
 
@@ -136,7 +148,7 @@ export async function POST(request: NextRequest) {
     const { ingredients, ...recipeData } = parsed.data;
 
     const pantrySnapshot = await prisma.inventory.findMany({
-      where: { userId: DEMO_USER_ID },
+      where: { userId },
       select: { ingredientId: true },
     });
 
@@ -147,6 +159,7 @@ export async function POST(request: NextRequest) {
         techniques: recipeData.techniques as any,
         flavorTags: recipeData.flavorTags ?? {},
         source: "USER_CREATED" as any,
+        ownerUserId: userId,
         pantrySnapshotAtGen: pantrySnapshot.map((i) => i.ingredientId),
         ingredients: {
           create: ingredients.map((ing) => ({

@@ -15,7 +15,7 @@ export function foodWebQueryKey(filters?: FoodWebFilters) {
   return [
     "food-web",
     filters?.cuisine ?? "__all__",
-    filters?.pantryOnly ?? false,
+    filters?.pantryOnly ?? true,
     filters?.minWeight ?? 1,
     filters?.mode ?? "co-occurrence",
   ] as const;

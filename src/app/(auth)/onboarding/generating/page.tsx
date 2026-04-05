@@ -6,8 +6,6 @@ import { ChefHat, BookOpen, Sparkles, Check } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
-const DEMO_USER_ID = "demo-user";
-
 const GENERATION_PHASES = [
   { label: "Analyzing your pantry and preferences...", duration: 2000 },
   { label: "Matching ingredients to your favorite cuisines...", duration: 3000 },
@@ -32,7 +30,7 @@ export default function GeneratingPage() {
   useEffect(() => {
     async function fetchUserContext() {
       try {
-        const res = await fetch(`/api/inventory`);
+        const res = await fetch("/api/inventory", { credentials: "include" });
         if (res.ok) {
           const items = await res.json();
           setStats({ ingredientCount: items.length, cuisines: [] });
@@ -75,8 +73,8 @@ export default function GeneratingPage() {
         const res = await fetch("/api/ai/generate-batch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
-            userId: DEMO_USER_ID,
             trigger: "ONBOARDING_BATCH",
             count: 10,
           }),

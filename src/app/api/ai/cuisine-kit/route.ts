@@ -3,12 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { openai, OPENAI_MODEL_JSON } from "@/lib/openai";
 import { z } from "zod";
 import { buildCuisineKitPrompt } from "@/lib/ai/cuisine-kit-prompt";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
+import { tryResolveIngredientName } from "@/lib/engines/ingredient-resolve";
 
 const requestSchema = z.object({
   cuisine: z.string().min(1),
-  userId: z.string().optional(),
 });
 
 const pantryItemSchema = z.object({
@@ -49,6 +48,10 @@ const PRIORITY_MAP = {
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = requestSchema.safeParse(body);
 
@@ -60,7 +63,6 @@ export async function POST(request: NextRequest) {
     }
 
     const { cuisine } = parsed.data;
-    const userId = parsed.data.userId ?? DEMO_USER_ID;
 
     const existing = await prisma.cuisineExploration.findUnique({
       where: { userId_cuisine: { userId, cuisine: cuisine as never } },
@@ -120,14 +122,9 @@ export async function POST(request: NextRequest) {
 
     const ingredientMap = new Map<string, string>();
     for (const item of pantryKit) {
-      const ingredient = await prisma.ingredient.findFirst({
-        where: {
-          name: { equals: item.name, mode: "insensitive" },
-        },
-        select: { id: true },
-      });
-      if (ingredient) {
-        ingredientMap.set(item.name, ingredient.id);
+      const resolved = await tryResolveIngredientName(prisma, item.name);
+      if (resolved) {
+        ingredientMap.set(item.name, resolved.ingredientId);
       }
     }
 

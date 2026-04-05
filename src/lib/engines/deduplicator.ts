@@ -1,13 +1,20 @@
 import Fuse from "fuse.js";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { recipeVisibilityClause } from "@/lib/recipes/visibility";
 
 export async function isDuplicate(
   newTitle: string,
   newIngredientNames: string[],
   cuisine: string,
+  viewerUserId: string,
 ): Promise<{ isDuplicate: boolean; existingRecipeId?: string }> {
+  const where: Prisma.RecipeWhereInput = {
+    status: "active",
+    AND: [recipeVisibilityClause(viewerUserId)],
+  };
   const existingRecipes = await prisma.recipe.findMany({
-    where: { status: "active" },
+    where,
     select: {
       id: true,
       title: true,
@@ -47,7 +54,7 @@ export async function isDuplicate(
     }
 
     const largerSetSize = Math.max(existingNames.size, newNames.size);
-    if (largerSetSize > 0 && intersectionSize / largerSetSize > 0.8) {
+    if (largerSetSize > 0 && intersectionSize / largerSetSize > 0.9) {
       return { isDuplicate: true, existingRecipeId: existing.id };
     }
   }

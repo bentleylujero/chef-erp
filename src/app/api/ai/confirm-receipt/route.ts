@@ -4,8 +4,7 @@ import { z } from "zod";
 import { addDays } from "date-fns";
 import { checkNewIngredientGeneration } from "@/lib/engines/generation-trigger";
 import { scheduleNewIngredientRecipeGeneration } from "@/lib/engines/schedule-new-ingredient-recipes";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 const confirmSchema = z.object({
   items: z.array(
@@ -24,6 +23,10 @@ const confirmSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = confirmSchema.safeParse(body);
 
@@ -46,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     const receiptScan = await prisma.receiptScan.create({
       data: {
-        userId: DEMO_USER_ID,
+        userId,
         imageUrl: imageBase64 ? "data:image/receipt" : "manual-entry",
         status: "CONFIRMED",
         storeName: storeName ?? null,
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
     const purchaseDate = receiptDate ? new Date(receiptDate) : new Date();
 
     const purchaseHistoryData = items.map((item) => ({
-      userId: DEMO_USER_ID,
+      userId,
       ingredientId: item.ingredientId,
       quantity: item.quantity,
       unit: item.unit,
@@ -90,7 +93,7 @@ export async function POST(request: NextRequest) {
     for (const item of items) {
       const existing = await prisma.inventory.findFirst({
         where: {
-          userId: DEMO_USER_ID,
+          userId,
           ingredientId: item.ingredientId,
         },
       });
@@ -114,7 +117,7 @@ export async function POST(request: NextRequest) {
       } else {
         await prisma.inventory.create({
           data: {
-            userId: DEMO_USER_ID,
+            userId,
             ingredientId: item.ingredientId,
             quantity: item.quantity,
             unit: item.unit,
@@ -130,7 +133,7 @@ export async function POST(request: NextRequest) {
     }
 
     const signalData = items.map((item) => ({
-      userId: DEMO_USER_ID,
+      userId,
       signalType: "PURCHASED" as const,
       entityType: "INGREDIENT" as const,
       entityId: item.ingredientId,
@@ -145,10 +148,10 @@ export async function POST(request: NextRequest) {
 
     await prisma.preferenceSignal.createMany({ data: signalData });
 
-    scheduleNewIngredientRecipeGeneration(DEMO_USER_ID, newPantryIngredientIds);
+    scheduleNewIngredientRecipeGeneration(userId, newPantryIngredientIds);
 
     const genDecision = await checkNewIngredientGeneration(
-      DEMO_USER_ID,
+      userId,
       newPantryIngredientIds,
     );
     const generationTriggered = genDecision.shouldGenerate;

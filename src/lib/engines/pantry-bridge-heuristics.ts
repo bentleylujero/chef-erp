@@ -91,12 +91,12 @@ export function rankPantryBridgePairs(
     const key = `${sortedA}::${sortedB}`;
     if (attemptedPairKeys.has(key) || seenKeys.has(key)) return;
     seenKeys.add(key);
-    const nameFor = (id: string) => (id === idA ? nameA : nameB);
+    const swapped = sortedA !== idA;
     scored.push({
       ingredientIdA: sortedA,
       ingredientIdB: sortedB,
-      nameA: nameFor(sortedA),
-      nameB: nameFor(sortedB),
+      nameA: swapped ? nameB : nameA,
+      nameB: swapped ? nameA : nameB,
       score: s,
     });
   };

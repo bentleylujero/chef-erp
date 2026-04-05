@@ -1,24 +1,19 @@
 import { HUD } from "./food-web-constants";
 
-export function HudCorners({ color = HUD.cyanDim }: { color?: string }) {
-  const s = { borderColor: color };
+/**
+ * Subtle warm corner accents — two small dots at opposing corners
+ * that give panels a cartographic "pin" feel.
+ */
+export function HudCorners({ color = HUD.accentDim }: { color?: string }) {
   return (
     <>
       <span
-        className="pointer-events-none absolute top-0 left-0 h-2 w-2 border-t border-l"
-        style={s}
+        className="pointer-events-none absolute top-1.5 left-1.5 h-1 w-1 rounded-full"
+        style={{ backgroundColor: color }}
       />
       <span
-        className="pointer-events-none absolute top-0 right-0 h-2 w-2 border-t border-r"
-        style={s}
-      />
-      <span
-        className="pointer-events-none absolute bottom-0 left-0 h-2 w-2 border-b border-l"
-        style={s}
-      />
-      <span
-        className="pointer-events-none absolute bottom-0 right-0 h-2 w-2 border-b border-r"
-        style={s}
+        className="pointer-events-none absolute bottom-1.5 right-1.5 h-1 w-1 rounded-full"
+        style={{ backgroundColor: color }}
       />
     </>
   );

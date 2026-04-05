@@ -34,6 +34,7 @@ export function useParseReceipt() {
       const res = await fetch("/api/ai/parse-receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ imageBase64 }),
       });
       if (!res.ok) {
@@ -52,6 +53,7 @@ export function useConfirmReceipt() {
       const res = await fetch("/api/ai/confirm-receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       if (!res.ok) {

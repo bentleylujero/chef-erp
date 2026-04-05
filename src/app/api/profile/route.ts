@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 export async function GET() {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const user = await prisma.user.findUnique({
-      where: { id: DEMO_USER_ID },
+      where: { id: userId },
       include: {
         flavorProfile: true,
         cookingStyle: true,
@@ -28,18 +31,18 @@ export async function GET() {
 
     const [avgRating, favoriteCuisine, favoriteTechnique] = await Promise.all([
       prisma.recipeRating.aggregate({
-        where: { userId: DEMO_USER_ID },
+        where: { userId },
         _avg: { rating: true },
       }),
       prisma.cookingLog.groupBy({
         by: ["recipeId"],
-        where: { userId: DEMO_USER_ID },
+        where: { userId },
         _count: true,
         orderBy: { _count: { recipeId: "desc" } },
         take: 1,
       }),
       prisma.techniqueLog.findFirst({
-        where: { userId: DEMO_USER_ID },
+        where: { userId },
         orderBy: { timesPerformed: "desc" },
       }),
     ]);
@@ -100,6 +103,10 @@ const updateProfileSchema = z.object({
 
 export async function PUT(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = updateProfileSchema.safeParse(body);
 
@@ -113,23 +120,23 @@ export async function PUT(request: NextRequest) {
     const { cookingStyle, flavorProfile, ...userData } = parsed.data;
 
     const updatedUser = await prisma.user.update({
-      where: { id: DEMO_USER_ID },
+      where: { id: userId },
       data: userData,
     });
 
     if (cookingStyle) {
       await prisma.cookingStyle.upsert({
-        where: { userId: DEMO_USER_ID },
+        where: { userId },
         update: cookingStyle as any,
-        create: { userId: DEMO_USER_ID, ...cookingStyle } as any,
+        create: { userId, ...cookingStyle } as any,
       });
     }
 
     if (flavorProfile) {
       await prisma.flavorProfile.upsert({
-        where: { userId: DEMO_USER_ID },
+        where: { userId },
         update: flavorProfile,
-        create: { userId: DEMO_USER_ID, ...flavorProfile },
+        create: { userId, ...flavorProfile },
       });
     }
 

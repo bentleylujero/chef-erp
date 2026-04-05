@@ -3,8 +3,8 @@ import { z } from "zod";
 export const recipeInstructionSchema = z.object({
   step: z.string(),
   technique: z.string(),
-  timing: z.string().optional(),
-  notes: z.string().optional(),
+  timing: z.string().nullish(),
+  notes: z.string().nullish(),
 });
 
 export const generatedIngredientSchema = z.object({
@@ -12,7 +12,8 @@ export const generatedIngredientSchema = z.object({
   quantity: z.number(),
   unit: z.string(),
   isOptional: z.boolean().default(false),
-  prepNote: z.string().optional(),
+  prepNote: z.string().nullish(),
+  substituteFor: z.string().nullish(), // "this pantry ingredient substitutes for [ideal ingredient]"
 });
 
 export const generatedRecipeSchema = z.object({

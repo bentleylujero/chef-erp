@@ -8,8 +8,7 @@ import { addDays, startOfDay, startOfWeek } from "date-fns";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { categoryToStoreSection } from "@/lib/utils/categories";
-
-const DEMO_USER_ID = "demo-user";
+import { requireApiUserId } from "@/lib/auth/api-user";
 
 type AggKey = string;
 
@@ -261,8 +260,12 @@ async function createItemsForList(
 
 export async function GET() {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const lists = await prisma.groceryList.findMany({
-      where: { userId: DEMO_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: "desc" },
       include: {
         items: { select: { checked: true } },
@@ -300,6 +303,10 @@ const createListSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireApiUserId();
+    if ("response" in auth) return auth.response;
+    const { userId } = auth;
+
     const body = await request.json();
     const parsed = createListSchema.safeParse(body);
     if (!parsed.success) {
@@ -310,11 +317,11 @@ export async function POST(request: NextRequest) {
     }
 
     const { name, source } = parsed.data;
-    const invTotals = await getInventoryTotalsByKey(DEMO_USER_ID);
+    const invTotals = await getInventoryTotalsByKey(userId);
 
     const list = await prisma.groceryList.create({
       data: {
-        userId: DEMO_USER_ID,
+        userId,
         name,
         status: "DRAFT",
         estimatedTotal: null,
@@ -322,11 +329,11 @@ export async function POST(request: NextRequest) {
     });
 
     if (source === "meal-plan") {
-      const mealNeeds = await buildMealPlanNeedMap(DEMO_USER_ID, invTotals);
+      const mealNeeds = await buildMealPlanNeedMap(userId, invTotals);
       await createItemsForList(list.id, mealNeeds);
     } else if (source === "smart") {
-      const mealNeeds = await buildMealPlanNeedMap(DEMO_USER_ID, invTotals);
-      const parNeeds = await buildParDeficitMap(DEMO_USER_ID);
+      const mealNeeds = await buildMealPlanNeedMap(userId, invTotals);
+      const parNeeds = await buildParDeficitMap(userId);
       const merged = mergeMaps(mealNeeds, parNeeds);
       await createItemsForList(list.id, merged);
     }
