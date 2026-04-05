@@ -1,4 +1,40 @@
-import { IngredientCategory } from "@prisma/client";
+/**
+ * Mirror of the Prisma IngredientCategory enum.
+ * Defined locally so this file can be imported in client components
+ * (Prisma client can't run in the browser).
+ */
+export const IngredientCategory = {
+  PROTEIN: "PROTEIN",
+  PRODUCE: "PRODUCE",
+  POULTRY: "POULTRY",
+  RED_MEAT: "RED_MEAT",
+  SEAFOOD: "SEAFOOD",
+  CURED_DELI: "CURED_DELI",
+  VEGETABLE: "VEGETABLE",
+  FRUIT: "FRUIT",
+  AROMATIC: "AROMATIC",
+  MUSHROOM: "MUSHROOM",
+  DAIRY: "DAIRY",
+  CHEESE: "CHEESE",
+  CONDIMENT: "CONDIMENT",
+  SAUCE: "SAUCE",
+  PASTE: "PASTE",
+  VINEGAR: "VINEGAR",
+  PANTRY_STAPLE: "PANTRY_STAPLE",
+  SPICE: "SPICE",
+  GRAIN: "GRAIN",
+  LEGUME: "LEGUME",
+  OIL_FAT: "OIL_FAT",
+  HERB: "HERB",
+  NUT_SEED: "NUT_SEED",
+  SWEETENER: "SWEETENER",
+  BEVERAGE: "BEVERAGE",
+  BAKING: "BAKING",
+  OTHER: "OTHER",
+} as const;
+
+export type IngredientCategory =
+  (typeof IngredientCategory)[keyof typeof IngredientCategory];
 
 export const INGREDIENT_CATEGORIES: Record<
   IngredientCategory,
